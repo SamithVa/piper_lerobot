@@ -12,17 +12,20 @@ pip install -e .
 
 # 测试相机
 
+两个相机不能从同一个扩展坞连接电脑
+
 ````
 sudo apt install guvcview    #安装Guvcview
-guvcview --device=/dev/video0  # 指定相机设备
-guvcview --device=/dev/video6  # 指定相机设备
+guvcview --device=/dev/video0  # 测试wrist相机
+guvcview --device=/dev/video6  # 测试ground相机
 ````
 
 # 连接机械臂
 
+"3-7.1:1.0"根据输出的can端口号改为自己的
+
 ````
 bash find_all_can_port.sh
-"3-7.1:1.0"根据输出的can端口号改为自己的
 bash can_activate.sh can_master 1000000 "3-7.1:1.0"
 bash can_activate.sh can_follower 1000000 "3-7.2:1.0"
 ````
@@ -46,8 +49,22 @@ lerobot-teleoperate \
 lerobot-record \
   --robot.type=piper_follower \
   --robot.cameras='{
-    "wrist": {"type": "opencv", "index_or_path": "/dev/video0", "width": 640, "height": 480, "fps": 30, "color_mode": "rgb"},
-    "ground": {"type": "opencv", "index_or_path": "/dev/video6", "width": 640, "height": 480, "fps": 30, "color_mode": "rgb"}
+    "wrist": {
+      "type": "opencv",
+      "index_or_path": "/dev/video0",
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "rotation": 0,
+    },
+    "ground": {
+      "type": "opencv",
+      "index_or_path": "/dev/video6",
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "rotation": 0,
+    }
   }' \
   --teleop.type=piper_leader \
   --display_data=true \
@@ -55,7 +72,8 @@ lerobot-record \
   --dataset.push_to_hub=false \
   --dataset.num_episodes=5 \
   --dataset.single_task="test"
-  ````
+````
+
 
 huggingface文档:huggingface.co/docs/lerobot/lerobot-dataset-v3
 
@@ -66,7 +84,7 @@ huggingface文档:huggingface.co/docs/lerobot/lerobot-dataset-v3
     --dataset.num_episodes=50 记录的总集数(50默认数:50)。
 ````
 
-录制过程中的键盘控制
+录制过程中使用键盘控制
 
 使用键盘快捷键控制数据记录流程:
 
@@ -77,5 +95,5 @@ huggingface文档:huggingface.co/docs/lerobot/lerobot-dataset-v3
 # 全部失能
 
 ````
-python /home/fourier/zhoukr/project/piper_lerobot/utils/teleop_disable.py
+python utils/teleop_disable.py
 ````

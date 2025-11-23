@@ -20,6 +20,7 @@ if __name__ == "__main__":
     while(piper_2.DisablePiper()):
         time.sleep(0.01)
     print("piper_2 失能成功!!!!")
-    #piper_2.MotionCtrl_1(0x02,0,0)#恢复
+    piper_1.MotionCtrl_1(0x02,0,0)#恢复
+    piper_2.MotionCtrl_1(0x02,0,0)#恢复
     time.sleep(0.5)
     
