@@ -10,6 +10,14 @@ cd piper_lerobot
 pip install -e .
 ````
 
+# 测试相机
+
+````
+sudo apt install guvcview    #安装Guvcview
+guvcview --device=/dev/video0  # 指定相机设备
+guvcview --device=/dev/video6  # 指定相机设备
+````
+
 # 连接机械臂
 
 ````
@@ -38,7 +46,7 @@ lerobot-teleoperate \
 lerobot-record \
   --robot.type=piper_follower \
   --robot.cameras='{
-    "wrist": {"type": "opencv", "index_or_path": "/dev/video4", "width": 640, "height": 480, "fps": 30, "color_mode": "rgb"},
+    "wrist": {"type": "opencv", "index_or_path": "/dev/video0", "width": 640, "height": 480, "fps": 30, "color_mode": "rgb"},
     "ground": {"type": "opencv", "index_or_path": "/dev/video6", "width": 640, "height": 480, "fps": 30, "color_mode": "rgb"}
   }' \
   --teleop.type=piper_leader \
@@ -48,3 +56,9 @@ lerobot-record \
   --dataset.num_episodes=5 \
   --dataset.single_task="test"
   ````
+
+# 全部失能
+
+````
+python /home/fourier/zhoukr/project/piper_lerobot/utils/teleop_disable.py
+````
