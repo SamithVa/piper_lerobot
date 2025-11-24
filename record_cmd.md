@@ -1,4 +1,4 @@
-# Put round yellow tape into the brown box.
+# 示例 Put round yellow tape into the brown box.
 ````
 lerobot-record \
   --robot.type=piper_follower \
