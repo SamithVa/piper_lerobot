@@ -1,4 +1,4 @@
-# Put A into the brown box.
+# Put round yellow tape into the brown box.
 ````
 lerobot-record \
   --robot.type=piper_follower \
@@ -31,13 +31,16 @@ lerobot-record \
 
 # 清除记录
 
-‵‵‵‵
+````
 rm -r ~/.cache/huggingface/lerobot/jokeru/record1
 ````
 
 # 查看结果
 
+进入数据集文件夹，使vlc查看视频
+
 ````
+cd ~/.cache/huggingface/lerobot/jokeru/record1
 vlc observation.images.ground/chunk-000/file-000.mp4
 vlc observation.images.wrist/chunk-000/file-000.mp4
 ````
