@@ -25,6 +25,7 @@ guvcview --device=/dev/video6  # 测试ground相机
 "3-7.1:1.0"根据输出的can端口号改为自己的
 
 ````
+conda activate lerobot
 bash find_all_can_port.sh
 bash can_activate.sh can_master 1000000 "3-7.1:1.0"
 bash can_activate.sh can_follower 1000000 "3-7.2:1.0"
@@ -40,6 +41,7 @@ lerobot-teleoperate \
     --teleop.id=my_leader_arm \
     --display_data=true
 ````
+
 
 # 采集数据集
 
@@ -74,14 +76,22 @@ lerobot-record \
   --dataset.single_task="test"
 ````
 
+数据会保存到~/.cache/huggingface/lerobot/jokeru
+
+查看相机视频
+
+````
+sudo apt install vlc
+vlc *.mp4
+````
 
 huggingface文档:huggingface.co/docs/lerobot/lerobot-dataset-v3
 
 使用命令行参数设置数据记录的流程:
 ````
-    --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认值:60秒)。
-    --dataset.reset_time_s=60 每episode之后重置环境的时长(60 seconds默认值:60秒)。
-    --dataset.num_episodes=50 记录的总集数(50默认数:50)。
+  --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认60秒)，可提前结束。
+  --dataset.reset_time_s=60 每episode之后重置环境的时长(默认60秒)。
+  --dataset.num_episodes=50 记录的总episode数(默认50)。
 ````
 
 录制过程中使用键盘控制
