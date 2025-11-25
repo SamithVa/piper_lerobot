@@ -104,9 +104,11 @@ huggingface文档:huggingface.co/docs/lerobot/lerobot-dataset-v3
 
 # 可视化数据集
 
+````
 python src/lerobot/scripts/lerobot_dataset_viz.py \
     --repo-id jokeru/record1 \
     --episode-index 0
+````
 
 # 全部失能
 
