@@ -7,7 +7,7 @@
 ````
 conda create -y -n lerobot python=3.10
 conda activate lerobot
-conda install ffmpeg=7.1.1
+conda install -c conda-forge ffmpeg=7.1.1 -y
 git clone https://github.com/jokeru8/piper_lerobot.git
 cd piper_lerobot
 pip install -e .
@@ -118,11 +118,11 @@ python utils/teleop_disable.py
 lerobot-train \
   --dataset.repo_id=jokeru/record1 \
   --policy.type=act \
-  --output_dir=outputs/train/act_your_dataset \
-  --job_name=act_tape \
+  --output_dir=outputs/train/record1 \
+  --job_name=act_finetune \
   --policy.device=cuda \
   --wandb.enable=false \
-  --policy.repo_id=jokeru/act_policy
+  --policy.repo_id=jokeru/act
 ````
 
 ### 测试ACT
