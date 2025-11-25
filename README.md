@@ -5,17 +5,17 @@
 ## 1.环境创建
 
 ````
-conda create -y -n lerobot_v21 python=3.10
-conda activate lerobot_v21
+conda create -y -n lerobot python=3.10
+conda activate lerobot
 conda install ffmpeg=7.1.1
-git clone https://github.com/jokeru8/piper_lerobot_v21.git
-cd piper_lerobot_v21
+git clone https://github.com/jokeru8/piper_lerobot.git
+cd piper_lerobot
 pip install -e .
 ````
 
 ## 2.测试相机
 
-两个相机不能从同一个扩展坞连接电脑
+注意两个相机不能从同一个扩展坞连接电脑,否则可能读取会出问题
 
 ````
 sudo apt install guvcview    #安装Guvcview
@@ -79,24 +79,24 @@ lerobot-record \
   --dataset.single_task="test"
 ````
 
-### 5.1其他可选参数:
-````
-  --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认60秒)，可提前结束。
-  --dataset.reset_time_s=60 每episode之后重置环境的时长(默认60秒)。
-  --dataset.num_episodes=50 记录的总episode数(默认50)。
-````
+  ### 5.1其他可选参数:
+  ````
+    --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认60秒)，可提前结束。
+    --dataset.reset_time_s=60 每episode之后重置环境的时长(默认60秒)。
+    --dataset.num_episodes=50 记录的总episode数(默认50)。
+  ````
 
-数据会保存到~/.cache/huggingface/lerobot/jokeru
+  数据会保存到~/.cache/huggingface/lerobot/jokeru
 
-录制过程中使用键盘控制
+  录制过程中使用键盘控制
 
-### 5.2使用键盘快捷键控制数据采集
+  ### 5.2使用键盘快捷键控制数据采集
 
-按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个。
+  按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个。
 
-按左箭头(→):取消当前事件并重新录制。
+  按左箭头(→):取消当前事件并重新录制。
 
-按ESC:立即停止会话,编码视频并上传数据集。
+  按ESC:立即停止会话,编码视频并上传数据集。
 
 ## 6.可视化数据集
 
