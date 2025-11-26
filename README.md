@@ -58,7 +58,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 hf auth login --token ${HUGGINGFACE_TOKEN} --add-to-git-credential
 ````
 
-
+验证登录
 ````
 HF_USER=$(hf auth whoami | head -n 1)
 echo $HF_USER
@@ -66,8 +66,7 @@ echo $HF_USER
 
 上传数据集到huggingface
 ````
-hf upload jokeru/record2 ~/.cache/huggingface/lerobot/jokeru/record2 --repo-type dataset
-
+hf upload jokeru/record2 ~/.cache/huggingface/lerobot/jokeru/record2 --repo-type dataset --revision "v3.0" 
 ````
 
 
