@@ -45,9 +45,34 @@ lerobot-teleoperate \
     --teleop.id=my_leader_arm \
     --display_data=true
 ````
+## 5.登陆huggingface
+
+设置国内镜像加速
+````
+export HF_ENDPOINT=https://hf-mirror.com
+````
+
+通过运行此命令将您的令牌添加到CLI:
+
+````
+hf auth login --token ${HUGGINGFACE_TOKEN} --add-to-git-credential
+````
 
 
-## 5.采集数据集
+````
+HF_USER=$(hf auth whoami | head -n 1)
+echo $HF_USER
+````
+
+上传数据集到huggingface
+````
+hf upload jokeru/record2 ~/.cache/huggingface/lerobot/jokeru/record2 --repo-type dataset
+
+````
+
+
+
+## 6.采集数据集
 
 /dev/video0等参数改为自己对应的端口
 
@@ -57,15 +82,15 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
-      "width": 640,
-      "height": 480,
+      "index_or_path": "/dev/video6",
+      "width": 480,
+      "height": 640,
       "fps": 30,
-      "rotation": 0,
+      "rotation": 90,
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video6",
+      "index_or_path": "/dev/video4",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -80,7 +105,7 @@ lerobot-record \
   --dataset.single_task="test"
 ````
 
-  ### 5.1其他可选参数:
+  ### 6.1其他可选参数:
   ````
     --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认60秒)，可提前结束。
     --dataset.reset_time_s=60 每episode之后重置环境的时长(默认60秒)。
@@ -91,7 +116,7 @@ lerobot-record \
 
   录制过程中使用键盘控制
 
-  ### 5.2使用键盘快捷键控制数据采集
+  ### 6.2使用键盘快捷键控制数据采集
 
   按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个。
 
@@ -99,21 +124,28 @@ lerobot-record \
 
   按ESC:立即停止会话,编码视频并上传数据集。
 
-## 6.可视化数据集
+## 7.可视化数据集
 
 ````
 python src/lerobot/scripts/lerobot_dataset_viz.py \
     --repo-id jokeru/record1 \
     --episode-index 0
+```` 
+这种方法只能看一条episode
+
+也可以用vlc直接看mp4文件
+````
+vlc *.mp4
 ````
 
-## 7.全部失能
+
+## 8.全部失能
 
 ````
 python utils/teleop_disable.py
 ````
 
-## ACT
+## 9.ACT
 ### 训练ACT
 ````
 lerobot-train \
@@ -149,15 +181,15 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
-      "width": 640,
-      "height": 480,
+      "index_or_path": "/dev/video6",
+      "width": 480,
+      "height": 640,
       "fps": 30,
-      "rotation": 0,
+      "rotation": 90,
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video6",
+      "index_or_path": "/dev/video4",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -169,6 +201,6 @@ lerobot-record \
   --dataset.num_episodes=3 \
   --dataset.single_task="Pick up round yellow tape and place it into the brown box." \
   --policy.path=jokeru/act
+  --policy.path=/home/.cache/huggingface/hub/models--jokeru--act/snapshots/72f994e94a71254011f88081d7df13f5a78acb4e
 ````
 
-## Async 远程推理

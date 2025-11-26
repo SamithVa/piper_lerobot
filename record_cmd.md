@@ -13,7 +13,7 @@ echo $HF_USER
 ````
 
 
-# 示例 Put round yellow tape into the brown box.
+# 示例 Pick up the apple and put it into the basket.
 ````
 lerobot-record \
   --robot.type=piper_follower \
@@ -28,7 +28,7 @@ lerobot-record \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
+      "index_or_path": "/dev/video4",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -38,10 +38,10 @@ lerobot-record \
   --teleop.type=piper_leader \
   --display_data=true \
   --dataset.reset_time_s=5 \
-  --dataset.repo_id=jokeru/record1 \
-  --dataset.push_to_hub=true \
-  --dataset.num_episodes=2 \
-  --dataset.single_task="Pick up round yellow tape and place it into the brown box."
+  --dataset.repo_id=jokeru/record2 \
+  --dataset.push_to_hub=false \
+  --dataset.num_episodes=20 \
+  --dataset.single_task="Pick up the apple and put it into the basket."
 ````
 
 # 清除记录
@@ -57,3 +57,6 @@ python src/lerobot/scripts/lerobot_dataset_viz.py \
     --repo-id jokeru/record2 \
     --episode-index 0
 ````
+
+
+
