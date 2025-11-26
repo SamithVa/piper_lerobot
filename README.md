@@ -158,7 +158,7 @@ lerobot-train \
   --wandb.enable=false \
   --policy.repo_id=jokeru/act_pick_apple \
   --batch_size=128 \
-  --steps=1_000 \
+  --steps=12_000 \
   --num_workers=128
 ````
 
@@ -206,4 +206,3 @@ lerobot-record \
   --dataset.single_task="Pick up the apple and put it into the basket." \
   --policy.path=jokeru/act_pick_apple
 ````
-
