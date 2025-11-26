@@ -128,7 +128,21 @@ lerobot-train \
 
 ### 测试ACT
 
-#### 数据集上测试
+#### 仿真环境中测试
+
+````
+lerobot-eval \
+    --policy.path=jokeru/act_policy \
+    --env.type=your_env \
+    --eval.batch_size=10 \
+    --eval.n_episodes=10 \
+    --policy.use_amp=false \
+    --policy.device=cuda
+````
+
+#### 真机测试
+[huggingface真实世界机器人文档](https://huggingface.co/docs/lerobot/il_robots)
+
 ````
 lerobot-record \
   --robot.type=piper_follower \
@@ -151,27 +165,10 @@ lerobot-record \
     }
   }' \
   --display_data=true \
-  --dataset.repo_id=jokeru/eval_act_your_dataset \
-  --dataset.num_episodes=10 \
+  --dataset.repo_id=jokeru/eval_act \
+  --dataset.num_episodes=3 \
   --dataset.single_task="Pick up round yellow tape and place it into the brown box." \
-  --policy.path=jokeru/act_policy
-````
-
-````
-lerobot-eval \
-    --policy.path=jokeru/act_policy \
-    --env.type=pusht \
-    --eval.batch_size=10 \
-    --eval.n_episodes=10 \
-    --policy.use_amp=false \
-    --policy.device=cuda
-````
-
-#### 真机测试
-[huggingface真实世界机器人文档](https://huggingface.co/docs/lerobot/il_robots)
-
-````
-lerobot-deploy --config_path=deploy_act.yaml
+  --policy.path=jokeru/act
 ````
 
 ## Async 远程推理
