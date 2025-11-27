@@ -206,3 +206,89 @@ lerobot-record \
   --dataset.single_task="Pick up the apple and put it into the basket." \
   --policy.path=jokeru/act_pick_apple
 ````
+
+
+## 10.openpi
+### 环境安装
+
+安装lerobot的pi相关依赖
+````
+pip install -e ".[pi]"
+````
+
+### 训练
+
+````
+python src/lerobot/scripts/lerobot_train.py\
+    --dataset.repo_id=jokeru/record2 \
+    --policy.type=pi05 \
+    --output_dir=./outputs/pi05_training \
+    --job_name=pi05_training \
+    --policy.repo_id=jokeru/pi05 \
+    --policy.pretrained_path=lerobot/pi05_libero \
+    --policy.compile_model=true \
+    --policy.gradient_checkpointing=true \
+    --wandb.enable=false \
+    --policy.dtype=bfloat16 \
+    --steps=3000 \
+    --policy.device=cuda \
+    --batch_size=32
+````
+
+pi05_base或pi05_libero 会下载在如 ~/.cache/huggingface/hub/models--lerobot--pi05_base
+
+### 多卡训练
+可用 tests/training/test_multi_gpu.py 测试
+
+需要先安装依赖 pytest
+````
+pip install pytest
+````
+
+````
+nohup accelerate launch --num_processes=8 \
+  src/lerobot/scripts/lerobot_train.py\
+    --dataset.repo_id=jokeru/record2 \
+    --policy.type=pi05 \
+    --output_dir=./outputs/pi05_training \
+    --job_name=pi05_training \
+    --policy.repo_id=jokeru/pi05 \
+    --policy.pretrained_path=lerobot/pi05_libero \
+    --policy.compile_model=true \
+    --policy.gradient_checkpointing=true \
+    --wandb.enable=false \
+    --policy.dtype=bfloat16 \
+    --steps=3000 \
+    --policy.device=cuda \
+    --batch_size=32 > outputs/pi05_training.log 2>&1 &
+````
+
+## 11.异步推理
+### 安装
+````
+pip install -e ".[async]"
+````
+### 启用远程推理服务器
+````
+python src/lerobot/scripts/server/policy_server.py \
+    --host=127.0.0.1 \
+    --port=8080 \
+````
+
+### 客户端接入
+````
+python src/lerobot/scripts/server/robot_client.py \
+    --server_address=127.0.0.1:8080 \ # SERVER: the host address and port of the policy server
+    --robot.type=so100_follower \ # ROBOT: your robot type
+    --robot.port=/dev/tty.usbmodem585A0076841 \ # ROBOT: your robot port
+    --robot.id=follower_so100 \ # ROBOT: your robot id, to load calibration file
+    --robot.cameras="{ laptop: {type: opencv, index_or_path: 0, width: 1920, height: 1080, fps: 30}, phone: {type: opencv, index_or_path: 0, width: 1920, height: 1080, fps: 30}}" \ # POLICY: the cameras used to acquire frames, with keys matching the keys expected by the policy
+    --task="dummy" \ # POLICY: The task to run the policy on (`Fold my t-shirt`). Not necessarily defined for all policies, such as `act`
+    --policy_type=your_policy_type \ # POLICY: the type of policy to run (smolvla, act, etc)
+    --pretrained_name_or_path=user/model \ # POLICY: the model name/path on server to the checkpoint to run (e.g., lerobot/smolvla_base)
+    --policy_device=mps \ # POLICY: the device to run the policy on, on the server
+    --actions_per_chunk=50 \ # POLICY: the number of actions to output at once
+    --chunk_size_threshold=0.5 \ # CLIENT: the threshold for the chunk size before sending a new observation to the server
+    --aggregate_fn_name=weighted_average \ # CLIENT: the function to aggregate actions on overlapping portions
+    --debug_visualize_queue_size=True # CLIENT: whether to visualize the queue size at runtime
+````
