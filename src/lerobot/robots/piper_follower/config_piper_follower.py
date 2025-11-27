@@ -34,14 +34,14 @@ class PIPERFollowerConfig(RobotConfig):
                 fps=30,
                 width=480,
                 height=640,
-                rotation=90,  # 无旋转（可按需调整 90/180/270）
+                rotation=-90,  # 无旋转（可按需调整 90/180/270）
             ),
             "ground": OpenCVCameraConfig(
                 index_or_path="/dev/video6",
                 fps=30,
                 width=480,
                 height=640,
-                rotation=-90,
+                rotation=90,
             ),
         }
     )

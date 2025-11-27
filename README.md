@@ -120,11 +120,21 @@ lerobot-record \
 
   ### 使用键盘快捷键控制数据采集
 
-  按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个。
+  按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个
 
-  按左箭头(→):取消当前事件并重新录制。
+  按左箭头(→):取消当前事件并重新录制
 
-  按ESC:立即停止会话,编码视频并上传数据集。
+  按ESC:立即停止会话,编码视频并上传数据集
+
+  ### 合并数据集
+  ````
+  # 合并多个数据集（要求所有数据集特征完全一致）
+  lerobot-edit-dataset \
+    --repo_id jokeru/pick_and_place \
+    --operation.type merge \
+    --operation.repo_ids "['jokeru/record_apple', 'jokeru/record_banana','jokeru/record_watermelon','jokeru/record_tape']" \
+    --push_to_hub true
+  ````
 
 ## 7.可视化数据集
 
