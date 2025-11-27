@@ -197,10 +197,10 @@ lerobot-record \
     "ground": {
       "type": "opencv",
       "index_or_path": "/dev/video0",
-      "width": 640,
-      "height": 480,
+      "width": 480,
+      "height": 640,
       "fps": 30,
-      "rotation": 0,
+      "rotation": -90,
     }
   }' \
   --display_data=true \
@@ -272,8 +272,9 @@ nohup accelerate launch --num_processes=8 \
 pip install -e ".[async]"
 ````
 ### 启用远程推理服务器
+用 CUDA_VISIBLE_DEVICES 设置用空闲的 GPU 推理，否则会默认用 GPU0
 ````
-python -m src.lerobot.async_inference.policy_server \
+CUDA_VISIBLE_DEVICES=1 python -m src.lerobot.async_inference.policy_server \
     --host=127.0.0.1 \
     --port=8080 \
     --fps=30 \
@@ -282,9 +283,14 @@ python -m src.lerobot.async_inference.policy_server \
 ````
 
 ### 若端口未开放需建立转发端口
-在客户端
+在客户端建立端口转发，通过SSH把本地电脑的 8080 端口转发到远程服务器的 8080 端口,从而访问服务器上运行的服务
 ````
 ssh -L 8080:127.0.0.1:8080 服务器用户名@服务器地址 -N
+````
+
+验证端口转发建立成功
+````
+nc -zv 127.0.0.1 8080
 ````
 
 
@@ -297,7 +303,7 @@ python -m src.lerobot.async_inference.robot_client \
     --task="Pick up the apple and put it into the basket." \
     --policy_type=pi05 \
     --pretrained_name_or_path=jokeru/pi05_apple \
-    --policy_device=mps \
+    --policy_device=cuda \
     --actions_per_chunk=50 \
     --chunk_size_threshold=0.5 \
     --aggregate_fn_name=weighted_average \
