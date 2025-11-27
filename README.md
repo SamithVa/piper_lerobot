@@ -104,7 +104,7 @@ lerobot-record \
   --dataset.single_task="test"
 ````
 
-  ### 6.1其他可选参数:
+  ### 其他可选参数:
   ````
     --dataset.episode_time_s=60 每个数据记录episode的持续时间(默认60秒)，可提前结束。
     --dataset.reset_time_s=60 每episode之后重置环境的时长(默认60秒)。
@@ -115,7 +115,7 @@ lerobot-record \
 
   录制过程中使用键盘控制
 
-  ### 6.2使用键盘快捷键控制数据采集
+  ### 使用键盘快捷键控制数据采集
 
   按右箭头(→):提前停止当前事件,或重置时间,然后切换到下一个。
 
