@@ -83,15 +83,15 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video6",
+      "index_or_path": "/dev/video0",
       "width": 480,
       "height": 640,
       "fps": 30,
-      "rotation": 90,
+      "rotation": 0,
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video4",
+      "index_or_path": "/dev/video6",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -171,7 +171,7 @@ lerobot-train \
 
 ````
 lerobot-eval \
-    --policy.path=jokeru/act_policy \
+    --policy.path=jokeru/act_pick_apple \
     --env.type=your_env \
     --eval.batch_size=10 \
     --eval.n_episodes=10 \
@@ -196,7 +196,7 @@ lerobot-record \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video4",
+      "index_or_path": "/dev/video0",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -205,7 +205,7 @@ lerobot-record \
   }' \
   --display_data=true \
   --dataset.repo_id=jokeru/eval_act_pick_apple \
-  --dataset.num_episodes=1 \
+  --dataset.num_episodes=2 \
   --dataset.single_task="Pick up the apple and put it into the basket." \
   --policy.path=jokeru/act_pick_apple
 ````
@@ -273,51 +273,33 @@ pip install -e ".[async]"
 ````
 ### 启用远程推理服务器
 ````
-python src/lerobot/scripts/server/policy_server.py \
+python -m src.lerobot.async_inference.policy_server \
     --host=127.0.0.1 \
     --port=8080 \
+    --fps=30 \
+    --inference_latency=0.033 \
+    --obs_queue_timeout=1
 ````
+
+### 若端口未开放需建立转发端口
+在客户端
+````
+ssh -L 8080:127.0.0.1:8080 服务器用户名@服务器地址 -N
+````
+
 
 ### 客户端接入
 ````
-python src/lerobot/scripts/server/robot_client.py \
-    --server_address=127.0.0.1:8080 \ # 远程服务器 地址:端口
-    --robot.type=so100_follower \ 
-    --robot.cameras='{
-    "wrist": {
-      "type": "opencv",
-      "index_or_path": "/dev/video6",
-      "width": 480,
-      "height": 640,
-      "fps": 30,
-      "rotation": 90,
-    },
-    "ground": {
-      "type": "opencv",
-      "index_or_path": "/dev/video4",
-      "width": 640,
-      "height": 480,
-      "fps": 30,
-      "rotation": 0,
-    }
-  }' \
-    --task="Pick up the apple and put it into the basket." \ 
-    --policy_type=pi05 \ 
-    --pretrained_name_or_path=jokeru/pi05 \ # POLICY: the model name/path on server to the checkpoint to run (e.g., lerobot/smolvla_base)
-    --policy_device=mps \ # POLICY: the device to run the policy on, on the server
-    --actions_per_chunk=50 \ # POLICY: the number of actions to output at once
-    --chunk_size_threshold=0.5 \ # CLIENT: the threshold for the chunk size before sending a new observation to the server
-    --aggregate_fn_name=weighted_average \ # CLIENT: the function to aggregate actions on overlapping portions
-    --debug_visualize_queue_size=True # CLIENT: whether to visualize the queue size at runtime
-````
-
-### 服务器
-开启服务端口
-````
-python src/lerobot/scripts/server/policy_server.py \
-     --host=0.0.0.0 \
-     --port=8080 \
-     --fps=30 \
-     --inference_latency=0.033 \
-     --obs_queue_timeout=1
+python -m src.lerobot.async_inference.robot_client \
+    --server_address=127.0.0.1:8080 \
+    --robot.type=piper_follower \
+    --robot.cameras='{"wrist": {"type": "opencv", "index_or_path": "/dev/video6", "width": 480, "height": 640, "fps": 30, "rotation": 90}, "ground": {"type": "opencv", "index_or_path": "/dev/video0", "width": 480, "height": 640, "fps": 30, "rotation": -90}}' \
+    --task="Pick up the apple and put it into the basket." \
+    --policy_type=pi05 \
+    --pretrained_name_or_path=jokeru/pi05_apple \
+    --policy_device=mps \
+    --actions_per_chunk=50 \
+    --chunk_size_threshold=0.5 \
+    --aggregate_fn_name=weighted_average \
+    --debug_visualize_queue_size=True
 ````

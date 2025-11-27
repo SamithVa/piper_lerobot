@@ -61,7 +61,8 @@ class PiperMotorsBus:
             if(enable):
                 enable_flag = all(enable_list)
                 while( not self.piper.EnablePiper()):
-                    time.sleep(0.01)
+                    print('piper initing')
+                    time.sleep(0.1)
                 self.piper.GripperCtrl(0,1000,0x01, 0)
             else:
                 # move to safe disconnect position

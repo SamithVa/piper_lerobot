@@ -30,18 +30,18 @@ class PIPERFollowerConfig(RobotConfig):
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
             "wrist": OpenCVCameraConfig(
-                index_or_path="/dev/video6",
+                index_or_path="/dev/video0",
                 fps=30,
                 width=480,
                 height=640,
                 rotation=90,  # 无旋转（可按需调整 90/180/270）
             ),
             "ground": OpenCVCameraConfig(
-                index_or_path="/dev/video0",
+                index_or_path="/dev/video6",
                 fps=30,
-                width=640,
-                height=480,
-                rotation=0,
+                width=480,
+                height=640,
+                rotation=-90,
             ),
         }
     )
