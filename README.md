@@ -66,7 +66,9 @@ echo $HF_USER
 
 上传数据集到huggingface
 ````
-hf upload jokeru/record2 ~/.cache/huggingface/lerobot/jokeru/record2 --repo-type dataset --revision "v3.0" 
+hf upload jokeru/record2 ~/.cache/huggingface/lerobot/jokeru/record2 \
+  --repo-type dataset \
+  --revision "v3.0" 
 ````
 
 
@@ -98,10 +100,11 @@ lerobot-record \
   }' \
   --teleop.type=piper_leader \
   --display_data=true \
-  --dataset.repo_id=jokeru/record-test \
+  --dataset.reset_time_s=5 \
+  --dataset.repo_id=jokeru/record2 \
   --dataset.push_to_hub=false \
-  --dataset.num_episodes=5 \
-  --dataset.single_task="test"
+  --dataset.num_episodes=20 \
+  --dataset.single_task="Pick up the apple and put it into the basket."
 ````
 
   ### 其他可选参数:
