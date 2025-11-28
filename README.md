@@ -175,6 +175,23 @@ lerobot-train \
   --num_workers=128
 ````
 
+### 上传 model或checkpoints 到huggingface
+
+上传model
+````
+hf upload jokeru/pick_and_place ~/.cache/huggingface/lerobot/jokeru/pick_and_place \
+  --repo-type model \
+  --revision "main" 
+````
+
+上传checkpoints
+````
+hf upload jokeru/pick_and_place outputs/train/act_pick_and_place/checkpoints/040000/pretrained_model \
+  --repo-type model \
+  --revision "checkpoints_40000" 
+````
+
+
 ### 测试ACT
 
 #### 仿真环境中测试
