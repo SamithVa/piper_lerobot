@@ -15,7 +15,7 @@
 ###git token
 token.txt
 CMD.md
-
+outputs
 
 ### Environments & Dependencies ###
 .env
