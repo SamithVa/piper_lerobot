@@ -4,6 +4,7 @@
 
 ## 1.环境创建
 
+### 安装plerobot依赖
 ````
 conda create -y -n lerobot python=3.10
 conda activate lerobot
@@ -13,6 +14,12 @@ git clone https://github.com/jokeru8/piper_lerobot.git
 cd piper_lerobot
 pip install -e .
 ````
+### 安装piper依赖
+````
+pip install python-can
+pip install piper_sdk
+````
+
 
 ## 2.测试相机
 
