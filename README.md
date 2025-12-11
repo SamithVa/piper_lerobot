@@ -38,8 +38,8 @@ guvcview --device=/dev/video0  # 测试ground相机
 ````
 conda activate lerobot
 bash find_all_can_port.sh
-bash can_activate.sh can_master 1000000 "3-7.3.1:1.0"
-bash can_activate.sh can_follower 1000000 "3-7.3.2:1.0"
+bash can_activate.sh can_master 1000000 "1-8.2:1.0"
+bash can_activate.sh can_follower 1000000 "1-8.3:1.0"
 ````
 
 
@@ -100,7 +100,7 @@ lerobot-record \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video6",
+      "index_or_path": "/dev/video2",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -216,19 +216,19 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video6",
-      "width": 480,
-      "height": 640,
-      "fps": 30,
-      "rotation": 90
-    },
-    "ground": {
-      "type": "opencv",
       "index_or_path": "/dev/video0",
       "width": 480,
       "height": 640,
       "fps": 30,
       "rotation": -90
+    },
+    "ground": {
+      "type": "opencv",
+      "index_or_path": "/dev/video2",
+      "width": 480,
+      "height": 640,
+      "fps": 30,
+      "rotation": 90
     }
   }' \
   --display_data=true \
@@ -296,7 +296,77 @@ nohup accelerate launch --num_processes=8 \
     --batch_size=32 > outputs/pi05_training.log 2>&1 &
 ````
 
-## 11.异步推理
+### 本地推理
+
+#### RTC
+预训练
+
+````
+python examples/rtc/eval_with_real_robot.py \
+  --policy.path=lerobot/pi05_base \
+  --robot.type=piper_follower \
+  --robot.cameras='{
+    "wrist": {
+      "type": "opencv",
+      "index_or_path": "/dev/video0",
+      "width": 480,
+      "height": 640,
+      "fps": 30,
+      "rotation": -90
+    },
+    "ground": {
+      "type": "opencv",
+      "index_or_path": "/dev/video2",
+      "width": 480,
+      "height": 640,
+      "fps": 30,
+      "rotation": 90
+    }
+  }' \
+  --task="Pick up it and put it into the basket." \
+  --duration=120 \
+  --action_queue_size_to_get_new_actions=30 \
+  --fps=50 \
+  --rtc.execution_horizon=5 \
+  --display_data=true \
+  --device=cuda
+````
+
+
+
+````
+python examples/rtc/eval_with_real_robot.py \
+  --policy.path=jokeru/pi05_pick_and_place \
+  --robot.type=piper_follower \
+  --robot.cameras='{
+    "wrist": {
+      "type": "opencv",
+      "index_or_path": "/dev/video0",
+      "width": 480,
+      "height": 640,
+      "fps": 30,
+      "rotation": -90
+    },
+    "ground": {
+      "type": "opencv",
+      "index_or_path": "/dev/video2",
+      "width": 480,
+      "height": 640,
+      "fps": 30,
+      "rotation": 90
+    }
+  }' \
+  --task="Pick up it and put it into the basket." \
+  --duration=120 \
+  --action_queue_size_to_get_new_actions=30 \
+  --fps=50 \
+  --rtc.execution_horizon=5 \
+  --display_data=true \
+  --device=cuda
+````
+
+
+## 11.异步推理（本地推理显存不够）
 ### 安装
 ````
 pip install -e ".[async]"
