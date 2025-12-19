@@ -347,7 +347,8 @@ class ACT(nn.Module):
             # Note: The forward method of this returns a dict: {"feature_map": output}.
             self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
             backbone_feature_dim = backbone_model.fc.in_features
-        else:
+        
+        elif self.config.image_features and "fastvit" in self.config.vision_backbone:
             # timm backbone - use out_indices to get ONLY the last feature map (prevents memory leak)
             backbone_model = timm.create_model(
                 self.config.vision_backbone,
@@ -358,6 +359,14 @@ class ACT(nn.Module):
             # Wrap timm model to return dict format like IntermediateLayerGetter
             self.backbone = TimmFeatureExtractorWrapper(backbone_model)
             backbone_feature_dim = backbone_model.feature_info[-1]['num_chs']
+        
+        elif self.config.image_features and "shufflenet" in self.config.vision_backbone:
+            backbone_model = getattr(torchvision.models, config.vision_backbone)(
+                weights=config.pretrained_backbone_weights,
+            )
+            # Note: The forward method of this returns a dict: {"feature_map": output}.
+            self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"stage4": "feature_map"})
+            backbone_feature_dim = backbone_model.conv5[0].in_channels
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
