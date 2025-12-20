@@ -348,7 +348,7 @@ class ACT(nn.Module):
             self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
             backbone_feature_dim = backbone_model.fc.in_features
         
-        elif self.config.image_features and "fastvit" in self.config.vision_backbone:
+        elif self.config.image_features and ("fastvit" in self.config.vision_backbone or "dino" in self.config.vision_backbone):
             # timm backbone - use out_indices to get ONLY the last feature map (prevents memory leak)
             backbone_model = timm.create_model(
                 self.config.vision_backbone,
@@ -359,6 +359,9 @@ class ACT(nn.Module):
             # Wrap timm model to return dict format like IntermediateLayerGetter
             self.backbone = TimmFeatureExtractorWrapper(backbone_model)
             backbone_feature_dim = backbone_model.feature_info[-1]['num_chs']
+            
+            # Get expected input size for timm models (usually 224 for ViTs)
+            self.timm_input_size = backbone_model.pretrained_cfg.get('input_size', (3, 224, 224))[-1]
         
         elif self.config.image_features and "shufflenet" in self.config.vision_backbone:
             backbone_model = getattr(torchvision.models, config.vision_backbone)(
@@ -507,6 +510,10 @@ class ACT(nn.Module):
             # NOTE: If modifying this section, verify on MPS devices that
             # gradients remain stable (no explosions or NaNs).
             for img in batch[OBS_IMAGES]:
+                # Resize images for timm models if needed
+                if hasattr(self, 'timm_input_size') and (img.shape[-2] != self.timm_input_size or img.shape[-1] != self.timm_input_size):
+                    img = F.interpolate(img, size=(self.timm_input_size, self.timm_input_size), mode='bilinear', align_corners=False)
+                
                 cam_features = self.backbone(img)["feature_map"]
                 cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
                 cam_features = self.encoder_img_feat_input_proj(cam_features)

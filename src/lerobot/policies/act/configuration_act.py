@@ -109,12 +109,14 @@ class ACTConfig(PreTrainedConfig):
     # vision_backbone: str = "resnet18"
     # pretrained_backbone_weights: str | None = "ResNet18_Weights.IMAGENET1K_V1"
 
-    # fastvit
+    # timm backbones
     # vision_backbone: str = "fastvit_sa12.apple_in1k"
+    vision_backbone: str = "vit_small_patch16_224.dino"
+    
 
     # shufflenet 
-    vision_backbone: str = "shufflenet_v2_x1_0"
-    pretrained_backbone_weights: str | None = "ShuffleNet_V2_X1_0_Weights.IMAGENET1K_V1"
+    # vision_backbone: str = "shufflenet_v2_x1_0"
+    # pretrained_backbone_weights: str | None = "ShuffleNet_V2_X1_0_Weights.IMAGENET1K_V1"
     replace_final_stride_with_dilation: int = False
     # Transformer layers.
     pre_norm: bool = False
