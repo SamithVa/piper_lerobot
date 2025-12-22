@@ -41,6 +41,34 @@ from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 import timm
 
 
+def create_sinusoidal_time_embedding(
+    time: torch.Tensor, dimension: int, min_period: float, max_period: float, device="cpu"
+) -> Tensor:
+    """Computes sine-cosine positional embedding vectors for scalar time values (for flow matching)."""
+    if dimension % 2 != 0:
+        raise ValueError(f"dimension ({dimension}) must be divisible by 2")
+
+    if time.ndim != 1:
+        raise ValueError("The time tensor is expected to be of shape `(batch_size, )`.")
+
+    dtype = torch.float32 if device.type == "mps" else torch.float64
+    fraction = torch.linspace(0.0, 1.0, dimension // 2, dtype=dtype, device=device)
+    period = min_period * (max_period / min_period) ** fraction
+
+    # Compute the outer product
+    scaling_factor = 1.0 / period * 2 * math.pi
+    sin_input = scaling_factor[None, :] * time[:, None]
+    return torch.cat([torch.sin(sin_input), torch.cos(sin_input)], dim=1)
+
+
+def sample_beta(alpha, beta, bsize, device):
+    """Sample from beta distribution for time sampling."""
+    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=device)
+    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=device)
+    dist = torch.distributions.Beta(alpha_t, beta_t)
+    return dist.sample((bsize,))
+
+
 class TimmFeatureExtractorWrapper(nn.Module):
     """Wrapper for timm models to match IntermediateLayerGetter's return format."""
     def __init__(self, model):
@@ -145,7 +173,13 @@ class ACTPolicy(PreTrainedPolicy):
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
-        actions = self.model(batch)[0]
+        if self.config.use_flow_matching:
+            actions = self.model.sample_actions(
+                batch,
+                num_steps=self.config.num_inference_steps,
+            )
+        else:
+            actions = self.model(batch, use_flow_matching=False)[0]
         return actions
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
@@ -154,25 +188,37 @@ class ACTPolicy(PreTrainedPolicy):
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
 
-        actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch)
-
-        l1_loss = (
-            F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
-        ).mean()
-
-        loss_dict = {"l1_loss": l1_loss.item()}
-        if self.config.use_vae:
-            # Calculate Dₖₗ(latent_pdf || standard_normal). Note: After computing the KL-divergence for
-            # each dimension independently, we sum over the latent dimension to get the total
-            # KL-divergence per batch element, then take the mean over the batch.
-            # (See App. B of https://huggingface.co/papers/1312.6114 for more details).
-            mean_kld = (
-                (-0.5 * (1 + log_sigma_x2_hat - mu_hat.pow(2) - (log_sigma_x2_hat).exp())).sum(-1).mean()
-            )
-            loss_dict["kld_loss"] = mean_kld.item()
-            loss = l1_loss + mean_kld * self.config.kl_weight
+        if self.config.use_flow_matching:
+            # Flow matching training
+            losses = self.model(batch, use_flow_matching=True)
+            # Apply action padding mask
+            losses = losses * ~batch["action_is_pad"].unsqueeze(-1)
+            loss = losses.mean()
+            loss_dict = {
+                "loss": loss.item(),
+                "flow_matching_loss": loss.item(),
+            }
         else:
-            loss = l1_loss
+            # Original VAE-based training
+            actions_hat, (mu_hat, log_sigma_x2_hat) = self.model(batch, use_flow_matching=False)
+
+            l1_loss = (
+                F.l1_loss(batch[ACTION], actions_hat, reduction="none") * ~batch["action_is_pad"].unsqueeze(-1)
+            ).mean()
+
+            loss_dict = {"l1_loss": l1_loss.item()}
+            if self.config.use_vae:
+                # Calculate Dₖₗ(latent_pdf || standard_normal). Note: After computing the KL-divergence for
+                # each dimension independently, we sum over the latent dimension to get the total
+                # KL-divergence per batch element, then take the mean over the batch.
+                # (See App. B of https://huggingface.co/papers/1312.6114 for more details).
+                mean_kld = (
+                    (-0.5 * (1 + log_sigma_x2_hat - mu_hat.pow(2) - (log_sigma_x2_hat).exp())).sum(-1).mean()
+                )
+                loss_dict["kld_loss"] = mean_kld.item()
+                loss = l1_loss + mean_kld * self.config.kl_weight
+            else:
+                loss = l1_loss
 
         return loss, loss_dict
 
@@ -407,6 +453,16 @@ class ACT(nn.Module):
         # Final action regression head on the output of the transformer's decoder.
         self.action_head = nn.Linear(config.dim_model, self.config.action_feature.shape[0])
 
+        # Flow matching components
+        if config.use_flow_matching:
+            self.time_mlp = nn.Sequential(
+                nn.Linear(config.dim_model, config.dim_model),
+                nn.SiLU(),
+                nn.Linear(config.dim_model, config.dim_model),
+            )
+            # Project noisy actions to decoder input dimension
+            self.noisy_action_proj = nn.Linear(self.config.action_feature.shape[0], config.dim_model)
+
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -415,8 +471,117 @@ class ACT(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, tuple[Tensor, Tensor] | tuple[None, None]]:
-        """A forward pass through the Action Chunking Transformer (with optional VAE encoder).
+    def _sample_time(self, batch_size: int, device) -> Tensor:
+        """Sample timesteps for flow matching training."""
+        time_beta = sample_beta(
+            self.config.time_sampling_beta_alpha,
+            self.config.time_sampling_beta_beta,
+            batch_size,
+            device,
+        )
+        time = time_beta * self.config.time_sampling_scale + self.config.time_sampling_offset
+        return time.to(dtype=torch.float32, device=device)
+
+    @torch.no_grad()
+    def sample_actions(self, batch: dict[str, Tensor], num_steps: int = 10) -> Tensor:
+        """Sample actions using flow matching denoising."""
+        batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
+        device = batch[OBS_IMAGES][0].device if OBS_IMAGES in batch else batch[OBS_ENV_STATE].device
+        
+        # Encode observations once
+        encoder_out, encoder_in_pos_embed = self._encode_observations(batch, batch_size)
+        
+        # Start from pure noise
+        x_t = torch.randn(
+            batch_size,
+            self.config.chunk_size,
+            self.config.action_feature.shape[0],
+            device=device,
+        )
+        
+        # Denoising loop
+        dt = 1.0 / num_steps
+        for step in range(num_steps):
+            t = torch.full((batch_size,), step * dt, device=device, dtype=torch.float32)
+            
+            # Predict velocity
+            v_t = self._denoise_step(x_t, t, encoder_out, encoder_in_pos_embed, batch_size)
+            
+            # Update x_t: x_{t+dt} = x_t + v_t * dt
+            x_t = x_t + v_t * dt
+        
+        return x_t
+
+    def _encode_observations(self, batch: dict[str, Tensor], batch_size: int) -> tuple[Tensor, Tensor]:
+        """Encode observations to get encoder output (used during inference)."""
+        # Use zero latent for flow matching inference
+        latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
+            batch[OBS_IMAGES][0].device if OBS_IMAGES in batch else batch[OBS_ENV_STATE].device
+        )
+        
+        # Prepare transformer encoder inputs (same as in forward)
+        encoder_in_tokens = [self.encoder_latent_input_proj(latent_sample)]
+        encoder_in_pos_embed = list(self.encoder_1d_feature_pos_embed.weight.unsqueeze(1))
+        
+        if self.config.robot_state_feature:
+            encoder_in_tokens.append(self.encoder_robot_state_input_proj(batch[OBS_STATE]))
+        if self.config.env_state_feature:
+            encoder_in_tokens.append(self.encoder_env_state_input_proj(batch[OBS_ENV_STATE]))
+        
+        if self.config.image_features:
+            for img in batch[OBS_IMAGES]:
+                if hasattr(self, 'timm_input_size') and (img.shape[-2] != self.timm_input_size or img.shape[-1] != self.timm_input_size):
+                    img = F.interpolate(img, size=(self.timm_input_size, self.timm_input_size), mode='bilinear', align_corners=False)
+                
+                cam_features = self.backbone(img)["feature_map"]
+                cam_pos_embed = self.encoder_cam_feat_pos_embed(cam_features).to(dtype=cam_features.dtype)
+                cam_features = self.encoder_img_feat_input_proj(cam_features)
+                
+                cam_features = einops.rearrange(cam_features, "b c h w -> (h w) b c")
+                cam_pos_embed = einops.rearrange(cam_pos_embed, "b c h w -> (h w) b c")
+                
+                encoder_in_tokens.extend(list(cam_features))
+                encoder_in_pos_embed.extend(list(cam_pos_embed))
+        
+        encoder_in_tokens = torch.stack(encoder_in_tokens, axis=0)
+        encoder_in_pos_embed = torch.stack(encoder_in_pos_embed, axis=0)
+        
+        encoder_out = self.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
+        return encoder_out, encoder_in_pos_embed
+
+    def _denoise_step(self, x_t: Tensor, t: Tensor, encoder_out: Tensor, encoder_in_pos_embed: Tensor, batch_size: int) -> Tensor:
+        """Apply one denoising step."""
+        # Embed time
+        time_emb = create_sinusoidal_time_embedding(
+            t,
+            self.config.dim_model,
+            min_period=self.config.min_period,
+            max_period=self.config.max_period,
+            device=x_t.device,
+        )
+        time_emb = time_emb.type(x_t.dtype)
+        time_emb = self.time_mlp(time_emb)  # (B, D)
+        
+        # Project noisy actions and add time conditioning
+        noisy_action_embed = self.noisy_action_proj(x_t)  # (B, S, D)
+        decoder_in = noisy_action_embed + time_emb.unsqueeze(1)  # (B, S, D) + (B, 1, D)
+        decoder_in = decoder_in.transpose(0, 1)  # (S, B, D)
+        
+        # Decode
+        decoder_out = self.decoder(
+            decoder_in,
+            encoder_out,
+            encoder_pos_embed=encoder_in_pos_embed,
+            decoder_pos_embed=self.decoder_pos_embed.weight.unsqueeze(1),
+        )
+        
+        decoder_out = decoder_out.transpose(0, 1)  # (B, S, D)
+        v_t = self.action_head(decoder_out)  # (B, S, action_dim)
+        
+        return v_t
+
+    def forward(self, batch: dict[str, Tensor], use_flow_matching: bool = False) -> tuple[Tensor, tuple[Tensor, Tensor] | tuple[None, None]] | Tensor:
+        """A forward pass through the Action Chunking Transformer (with optional VAE encoder or flow matching).
 
         `batch` should have the following structure:
         {
@@ -426,23 +591,57 @@ class ACT(nn.Module):
                 AND/OR
             [env_state_feature]: (B, env_dim) batch of environment states.
 
-            [action_feature] (optional, only if training with VAE): (B, chunk_size, action dim) batch of actions.
+            [action_feature] (optional, only if training): (B, chunk_size, action dim) batch of actions.
         }
 
         Returns:
-            (B, chunk_size, action_dim) batch of action sequences
-            Tuple containing the latent PDF's parameters (mean, log(σ²)) both as (B, L) tensors where L is the
-            latent dimension.
+            If use_flow_matching=True: (B, chunk_size, action_dim) tensor of flow matching losses
+            Otherwise: ((B, chunk_size, action_dim) batch of action sequences,
+                        Tuple containing the latent PDF's parameters (mean, log(σ²)))
         """
-        if self.config.use_vae and self.training:
+        if use_flow_matching and self.training:
+            assert ACTION in batch, (
+                "actions must be provided when using flow matching in training mode."
+            )
+        elif self.config.use_vae and self.training:
             assert ACTION in batch, (
                 "actions must be provided when using the variational objective in training mode."
             )
 
         batch_size = batch[OBS_IMAGES][0].shape[0] if OBS_IMAGES in batch else batch[OBS_ENV_STATE].shape[0]
 
+        # Flow matching training path
+        if use_flow_matching and ACTION in batch and self.training:
+            # Sample noise and time for flow matching
+            noise = torch.randn_like(batch[ACTION])
+            time = self._sample_time(batch_size, batch[ACTION].device)
+            
+            # Compute x_t = t * noise + (1 - t) * actions and u_t = noise - actions
+            time_expanded = time[:, None, None]
+            x_t = time_expanded * noise + (1 - time_expanded) * batch[ACTION]
+            u_t = noise - batch[ACTION]
+            
+            # Embed time using sinusoidal position encoding
+            time_emb = create_sinusoidal_time_embedding(
+                time,
+                self.config.dim_model,
+                min_period=self.config.min_period,
+                max_period=self.config.max_period,
+                device=batch[ACTION].device,
+            )
+            time_emb = time_emb.type(batch[ACTION].dtype)
+            time_emb = self.time_mlp(time_emb)  # (B, D)
+            
+            # Project noisy actions
+            noisy_action_embed = self.noisy_action_proj(x_t)  # (B, S, D)
+            
+            # For flow matching, use zero latent (time conditioning is applied via decoder input)
+            latent_sample = torch.zeros([batch_size, self.config.latent_dim], dtype=torch.float32).to(
+                batch[ACTION].device
+            )
+            mu = log_sigma_x2 = None
         # Prepare the latent for input to the transformer encoder.
-        if self.config.use_vae and ACTION in batch and self.training:
+        elif self.config.use_vae and ACTION in batch and self.training:
             # Prepare the input to the VAE encoder: [cls, *joint_space_configuration, *action_sequence].
             cls_embed = einops.repeat(
                 self.vae_encoder_cls_embed.weight, "1 d -> b 1 d", b=batch_size
@@ -533,12 +732,21 @@ class ACT(nn.Module):
 
         # Forward pass through the transformer modules.
         encoder_out = self.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
-        # TODO(rcadene, alexander-soare): remove call to `device` ; precompute and use buffer
-        decoder_in = torch.zeros(
-            (self.config.chunk_size, batch_size, self.config.dim_model),
-            dtype=encoder_in_pos_embed.dtype,
-            device=encoder_in_pos_embed.device,
-        )
+        
+        # Prepare decoder input
+        if use_flow_matching and ACTION in batch and self.training:
+            # For flow matching, use noisy action embeddings + time conditioning
+            # Add time embedding to each action token for conditioning
+            decoder_in = noisy_action_embed + time_emb.unsqueeze(1)  # (B, S, D) + (B, 1, D)
+            decoder_in = decoder_in.transpose(0, 1)  # (S, B, D)
+        else:
+            # TODO(rcadene, alexander-soare): remove call to `device` ; precompute and use buffer
+            decoder_in = torch.zeros(
+                (self.config.chunk_size, batch_size, self.config.dim_model),
+                dtype=encoder_in_pos_embed.dtype,
+                device=encoder_in_pos_embed.device,
+            )
+        
         decoder_out = self.decoder(
             decoder_in,
             encoder_out,
@@ -551,6 +759,11 @@ class ACT(nn.Module):
 
         actions = self.action_head(decoder_out)
 
+        # Return flow matching loss if in that mode
+        if use_flow_matching and ACTION in batch and self.training:
+            v_t = actions
+            return F.mse_loss(u_t, v_t, reduction="none")
+        
         return actions, (mu, log_sigma_x2)
 
 
