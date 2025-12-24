@@ -139,7 +139,7 @@ class ACTConfig(PreTrainedConfig):
     # See this issue https://github.com/tonyzhaozh/act/issues/25#issue-2258740521.
     n_decoder_layers: int = 1
     # VAE.
-    use_vae: bool = True
+    use_vae: bool = False
     latent_dim: int = 32
     n_vae_encoder_layers: int = 4
 
@@ -150,6 +150,16 @@ class ACTConfig(PreTrainedConfig):
     # Training and loss computation.
     dropout: float = 0.1
     kl_weight: float = 10.0
+
+    # Flow matching parameters
+    use_flow_matching: bool = True
+    num_inference_steps: int = 10
+    time_sampling_beta_alpha: float = 1.0
+    time_sampling_beta_beta: float = 1.0
+    time_sampling_scale: float = 1.0
+    time_sampling_offset: float = 0.0
+    min_period: float = 1.0
+    max_period: float = 10000.0
 
     # Training preset
     optimizer_lr: float = 1e-5
