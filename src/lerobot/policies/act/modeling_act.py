@@ -40,6 +40,9 @@ from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 # timm 
 import timm
 
+# transformers for text encoding
+from transformers import AutoTokenizer, AutoModel
+
 
 class TimmFeatureExtractorWrapper(nn.Module):
     """Wrapper for timm models to match IntermediateLayerGetter's return format."""
@@ -52,6 +55,52 @@ class TimmFeatureExtractorWrapper(nn.Module):
         # With out_indices=[-1], we only get the last feature map
         features = self.model(x)
         return {"feature_map": features[0] if len(features) == 1 else features[-1]}
+
+
+class LightweightTextEncoder(nn.Module):
+    """Lightweight text encoder using pre-trained language model."""
+    def __init__(self, model_name: str = "distilbert-base-uncased", output_dim: int = 512):
+        super().__init__()
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name)
+        
+        # Freeze the pre-trained model to save computation
+        for param in self.model.parameters():
+            param.requires_grad = False
+        
+        # Get the hidden size from the model config
+        self.hidden_size = self.model.config.hidden_size
+        
+        # Projection layer to match the transformer dimension
+        self.projection = nn.Linear(self.hidden_size, output_dim)
+    
+    def forward(self, text_inputs: list[str], device: torch.device) -> Tensor:
+        """
+        Args:
+            text_inputs: List of text strings (batch of texts)
+            device: Device to place tensors on
+        Returns:
+            (batch_size, output_dim) tensor of text embeddings
+        """
+        # Tokenize the input texts
+        encoded = self.tokenizer(
+            text_inputs,
+            padding=True,
+            truncation=True,
+            max_length=77,  # Similar to CLIP's text length
+            return_tensors="pt"
+        ).to(device)
+        
+        # Get embeddings from the model
+        with torch.no_grad():
+            outputs = self.model(**encoded)
+            # Use [CLS] token embedding (first token)
+            text_embeddings = outputs.last_hidden_state[:, 0, :]
+        
+        # Project to desired dimension
+        text_embeddings = self.projection(text_embeddings)
+        
+        return text_embeddings
 
 
 class ACTPolicy(PreTrainedPolicy):
@@ -359,6 +408,17 @@ class ACT(nn.Module):
             # Wrap timm model to return dict format like IntermediateLayerGetter
             self.backbone = TimmFeatureExtractorWrapper(backbone_model)
             backbone_feature_dim = backbone_model.feature_info[-1]['num_chs']
+
+        elif self.config.image_features and "dino" in self.config.vision_backbone:
+            # timm backbone - use out_indices to get ONLY the last feature map (prevents memory leak)
+            backbone_model = timm.create_model(
+                self.config.vision_backbone,
+                pretrained=True,
+                num_classes=0,  # remove classifier nn.Linear
+            )
+            # Wrap timm model to return dict format like IntermediateLayerGetter
+            self.backbone = TimmFeatureExtractorWrapper(backbone_model)
+            backbone_feature_dim = backbone_model.feature_info[-1]['num_chs']
         
         elif self.config.image_features and "shufflenet" in self.config.vision_backbone:
             backbone_model = getattr(torchvision.models, config.vision_backbone)(
@@ -372,8 +432,14 @@ class ACT(nn.Module):
         self.encoder = ACTEncoder(config)
         self.decoder = ACTDecoder(config)
 
+        # Text encoder (lightweight)
+        self.use_text_conditioning = getattr(config, 'use_text_conditioning', False)
+        if self.use_text_conditioning:
+            text_model_name = getattr(config, 'text_encoder_model', 'distilbert-base-uncased')
+            self.text_encoder = LightweightTextEncoder(text_model_name, config.dim_model)
+        
         # Transformer encoder input projections. The tokens will be structured like
-        # [latent, (robot_state), (env_state), (image_feature_map_pixels)].
+        # [latent, (robot_state), (env_state), (text_embedding), (image_feature_map_pixels)].
         if self.config.robot_state_feature:
             self.encoder_robot_state_input_proj = nn.Linear(
                 self.config.robot_state_feature.shape[0], config.dim_model
@@ -393,6 +459,8 @@ class ACT(nn.Module):
             n_1d_tokens += 1
         if self.config.env_state_feature:
             n_1d_tokens += 1
+        if self.use_text_conditioning:
+            n_1d_tokens += 1  # for the text embedding
         self.encoder_1d_feature_pos_embed = nn.Embedding(n_1d_tokens, config.dim_model)
         if self.config.image_features:
             self.encoder_cam_feat_pos_embed = ACTSinusoidalPositionEmbedding2d(config.dim_model // 2)
@@ -501,6 +569,10 @@ class ACT(nn.Module):
         # Environment state token.
         if self.config.env_state_feature:
             encoder_in_tokens.append(self.encoder_env_state_input_proj(batch[OBS_ENV_STATE]))
+        # Text token (if text conditioning is enabled).
+        if self.use_text_conditioning and "task" in batch:
+            text_embedding = self.text_encoder(batch["task"], device=latent_sample.device)
+            encoder_in_tokens.append(text_embedding)
 
         if self.config.image_features:
             # For a list of images, the H and W may vary but H*W is constant.
