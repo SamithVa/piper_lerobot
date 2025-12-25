@@ -151,16 +151,6 @@ class ACTConfig(PreTrainedConfig):
     dropout: float = 0.1
     kl_weight: float = 10.0
 
-    # Flow matching parameters
-    use_flow_matching: bool = True
-    num_inference_steps: int = 10
-    time_sampling_beta_alpha: float = 1.0
-    time_sampling_beta_beta: float = 1.0
-    time_sampling_scale: float = 1.0
-    time_sampling_offset: float = 0.0
-    min_period: float = 1.0
-    max_period: float = 10000.0
-
     # Training preset
     optimizer_lr: float = 1e-5
     optimizer_weight_decay: float = 1e-4
