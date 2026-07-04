@@ -36,7 +36,6 @@ PYTHONPATH="$REPO/src" "$PY" -m lerobot.scripts.lerobot_record \
   --teleop.id=bi_piper_leader \
   --teleop.ema_alpha=0.4 \
   --display_data=true \
-  --play_sounds=false \
   --dataset.repo_id="$REPO_ID" \
   --dataset.root="$DATASET_ROOT" \
   --dataset.single_task="$TASK" \

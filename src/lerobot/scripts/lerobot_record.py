@@ -127,7 +127,6 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import (
     get_safe_torch_device,
     init_logging,
-    log_say,
 )
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 
@@ -190,8 +189,6 @@ class RecordConfig:
     policy: PreTrainedConfig | None = None
     # Display all cameras on screen
     display_data: bool = False
-    # Use vocal synthesis to read events.
-    play_sounds: bool = True
     # Resume recording on an existing dataset.
     resume: bool = False
 
@@ -462,7 +459,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             # ready. Press SPACE to begin recording; ESC still stops the session.
             if listener is not None:
                 events["start_episode"] = False
-                log_say("Press space to start recording", cfg.play_sounds)
+                logging.info("Press space to start recording")
                 logging.info(
                     f"Ready — press SPACE to start recording episode {dataset.num_episodes} "
                     f"(ESC to stop)."
@@ -475,7 +472,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 # Headless / no key listener: fall back to a blocking prompt.
                 input(f"Press Enter to start recording episode {dataset.num_episodes}... ")
 
-            log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
+            logging.info(f"Recording episode {dataset.num_episodes}")
             record_loop(
                 robot=robot,
                 events=events,
@@ -498,7 +495,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             if not events["stop_recording"] and (
                 (recorded_episodes < cfg.dataset.num_episodes - 1) or events["rerecord_episode"]
             ):
-                log_say("Reset the environment", cfg.play_sounds)
+                logging.info("Reset the environment")
                 record_loop(
                     robot=robot,
                     events=events,
@@ -513,7 +510,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 )
 
             if events["rerecord_episode"]:
-                log_say("Re-record episode", cfg.play_sounds)
+                logging.info("Re-record episode")
                 events["rerecord_episode"] = False
                 events["exit_early"] = False
                 dataset.clear_episode_buffer()
@@ -522,7 +519,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             dataset.save_episode()
             recorded_episodes += 1
 
-    log_say("Stop recording", cfg.play_sounds, blocking=True)
+    logging.info("Stop recording")
 
     robot.disconnect()
     if teleop is not None:
@@ -534,7 +531,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     if cfg.dataset.push_to_hub:
         dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
 
-    log_say("Exiting", cfg.play_sounds)
+    logging.info("Exiting")
     return dataset
 
 
