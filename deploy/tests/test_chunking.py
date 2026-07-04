@@ -53,32 +53,50 @@ def test_should_request_at_threshold():
     assert ex.should_request() is True
 
 
-def test_on_chunk_skips_ticks_elapsed_since_request():
+def test_on_chunk_skips_rows_executed_during_flight():
     ex = ChunkExecutor(chunk_threshold=0.5)
     ex.mark_requested()
     ex.on_chunk(chunk(10))
     for _ in range(5):
         ex.next_action()
     ex.mark_requested()  # obs captured now (tick 5)
-    ex.next_action()  # 2 more ticks pass while inference runs
+    ex.next_action()  # 2 more rows execute while inference runs
     ex.next_action()
     ex.on_chunk(chunk(10, start=100.0))
-    # new chunk row 0 corresponds to the obs tick; 2 ticks elapsed -> start at row 2
+    # new chunk row 0 corresponds to the obs tick; 2 rows executed -> start at row 2
     np.testing.assert_array_equal(ex.next_action(), [102.0, 102.0])
 
 
-def test_on_chunk_all_rows_stale_leaves_queue_dry():
+def test_dry_hold_does_not_consume_chunk_rows():
+    # Queue runs dry while a request is in flight: the robot holds position,
+    # so NO rows of the arriving chunk are stale.
     ex = ChunkExecutor()
     ex.mark_requested()
     ex.on_chunk(chunk(2))
-    for _ in range(5):  # burn well past the 2 delivered rows
+    ex.next_action()
+    ex.next_action()          # queue now empty
+    ex.mark_requested()       # obs captured while dry
+    for _ in range(3):
+        assert ex.next_action() is None  # holding; nothing executed
+    assert ex.on_chunk(chunk(3)) == 3    # all rows usable
+    np.testing.assert_array_equal(ex.next_action(), [0.0, 0.0])
+
+
+def test_fully_stale_chunk_under_overlap_recovers():
+    # Overlap case: old queue long enough that MORE rows execute during
+    # flight than the new chunk holds -> new chunk fully stale, queue dry,
+    # executor must allow an immediate re-request.
+    ex = ChunkExecutor(chunk_threshold=0.5)
+    ex.mark_requested()
+    ex.on_chunk(chunk(10))
+    for _ in range(5):
         ex.next_action()
     ex.mark_requested()
-    for _ in range(3):
-        ex.next_action()
-    ex.on_chunk(chunk(3))  # 3 elapsed >= 3 rows -> nothing usable
+    for _ in range(4):
+        ex.next_action()      # 4 rows executed while in flight
+    assert ex.on_chunk(chunk(3)) == 0    # 4 executed >= 3 rows -> nothing usable
     assert ex.next_action() is None
-    assert ex.should_request() is True  # must be able to recover
+    assert ex.should_request() is True
 
 
 def test_request_failed_clears_in_flight():

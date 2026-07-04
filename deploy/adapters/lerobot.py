@@ -67,9 +67,10 @@ class LerobotAdapter(PolicyAdapter):
         t = torch.as_tensor(np.ascontiguousarray(img))
         if t.ndim == 3 and t.shape[0] not in (1, 3):  # HWC -> CHW
             t = t.permute(2, 0, 1)
-        t = t.float()
-        if float(t.max()) > 1.5:  # uint8 [0,255] -> [0,1]
-            t = t / 255.0
+        if t.dtype == torch.uint8:
+            t = t.float() / 255.0
+        else:
+            t = t.float()
         return t.unsqueeze(0).to(self.device)
 
     @torch.no_grad()

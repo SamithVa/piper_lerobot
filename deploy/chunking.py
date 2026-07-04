@@ -26,6 +26,7 @@ class ChunkExecutor:
         self._chunk_len = 0  # length of the chunk the current queue came from
         self._tick = 0
         self._request_tick: int | None = None
+        self._executed_since_request = 0
 
     @property
     def in_flight(self) -> bool:
@@ -35,7 +36,10 @@ class ChunkExecutor:
         """Advance one control tick; return the next action row or None if dry."""
         self._tick += 1
         if self._queue:
-            return self._queue.popleft()
+            row = self._queue.popleft()
+            if self.in_flight:
+                self._executed_since_request += 1
+            return row
         return None
 
     def should_request(self) -> bool:
@@ -49,19 +53,28 @@ class ChunkExecutor:
     def mark_requested(self) -> None:
         """Call at the tick the observation was captured."""
         self._request_tick = self._tick
+        self._executed_since_request = 0
 
-    def on_chunk(self, chunk: np.ndarray) -> None:
-        """Install a fresh chunk, skipping the rows whose time already passed.
+    def on_chunk(self, chunk: np.ndarray) -> int:
+        """Install a fresh chunk, skipping the rows already executed during flight.
 
-        Row 0 of the chunk is the action for the observation's tick; if k ticks
-        elapsed between capture and arrival, rows [0, k) are stale.
+        Row 0 of the chunk is the action for the observation's tick. While the
+        request was in flight, some rows of the *old* queue may have been
+        executed (the arm moved); those many rows of the new chunk are stale
+        and are skipped. If the queue ran dry during flight (the arm held
+        position, unchanged from the observed state), no ticks were executed
+        and no rows are skipped — held ticks don't consume rows.
+
+        Returns the number of usable rows installed, so the caller can detect
+        a fully-stale chunk (0 usable rows) and log/re-request.
         """
-        elapsed = 0 if self._request_tick is None else self._tick - self._request_tick
+        skip = self._executed_since_request if self.in_flight else 0
         self._request_tick = None
         rows = list(np.asarray(chunk))
-        usable = rows[elapsed:]
+        usable = rows[skip:]
         self._queue = deque(usable)
         self._chunk_len = len(usable)
+        return len(usable)
 
     def on_request_failed(self) -> None:
         self._request_tick = None

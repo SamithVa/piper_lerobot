@@ -89,16 +89,16 @@ whatever env the launcher activates.
 - Endpoints:
   - `GET /info` → JSON from `adapter.info()`.
   - `POST /predict` → body is `np.savez_compressed` bytes containing
-    `img_<key>` arrays, `state`, and JSON-encoded `task`; response is raw
-    `np.save` bytes of the chunk.
-  - `POST /reset` → clears adapter state, 204.
+    `img_<key>` arrays, `state`, and `task` (0-d unicode array); response is
+    raw `np.save` bytes of the chunk.
+  - `POST /reset` → clears adapter state, 200.
 - Single-threaded inference (a lock around `predict_chunk`); requests queue.
 - Errors: HTTP 500 with the traceback as text body.
 
 ### Client (deploy/client.py)
 
-- Builds the robot from `--robot.type` (default `bi_piper_follower`) +
-  `--robot.cameras` JSON, identical config format to `record_bimanual.sh`.
+- Builds the robot from `--robot.type` + `--robot.cameras` JSON, identical
+  config format to `record_bimanual.sh`.
 - `--server=http://127.0.0.1:8080`, `--task`, `--duration_s`, `--fps`
   (default: server's fps), `--camera_map` JSON mapping robot camera names →
   checkpoint image keys (e.g. `{"top": "camera1", "l_wrist": "camera2",

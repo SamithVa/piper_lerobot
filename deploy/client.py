@@ -163,7 +163,11 @@ def main(cfg: DeployClientConfig):
         next_t = time.perf_counter()
         while time.perf_counter() < t_end:
             if "chunk" in pending:
-                executor.on_chunk(pending.pop("chunk"))
+                usable = executor.on_chunk(pending.pop("chunk"))
+                if usable == 0:
+                    logging.warning(
+                        "chunk arrived fully stale (inference slower than execution) — re-requesting"
+                    )
             if "error" in pending:
                 logging.warning(f"/predict failed: {pending.pop('error')}")
                 executor.on_request_failed()
@@ -176,7 +180,7 @@ def main(cfg: DeployClientConfig):
             elif last_action is not None:
                 robot.send_action(last_action)  # hold position while recovering
                 dry_ticks += 1
-                if dry_ticks % int(fps) == 1:
+                if dry_ticks % max(int(fps), 1) == 1:
                     logging.warning("action queue dry — holding position")
 
             if executor.should_request():

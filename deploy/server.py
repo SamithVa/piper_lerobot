@@ -42,10 +42,13 @@ def make_handler(adapter):
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.path == "/info":
-                self._send(200, json.dumps(adapter.info()).encode(), "application/json")
-            else:
-                self._send(404, b"not found", "text/plain")
+            try:
+                if self.path == "/info":
+                    self._send(200, json.dumps(adapter.info()).encode(), "application/json")
+                else:
+                    self._send(404, b"not found", "text/plain")
+            except Exception:
+                self._send(500, traceback.format_exc().encode(), "text/plain")
 
         def do_POST(self):
             try:

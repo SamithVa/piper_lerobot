@@ -62,6 +62,15 @@ def test_predict_error_returns_500_with_traceback(running_server):
     assert b"dummy failure requested" in excinfo.value.read()
 
 
+def test_info_error_returns_500(running_server):
+    base, adapter = running_server
+    adapter.info = lambda: (_ for _ in ()).throw(RuntimeError("info boom"))
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        urllib.request.urlopen(base + "/info", timeout=5.0)
+    assert excinfo.value.code == 500
+    assert b"info boom" in excinfo.value.read()
+
+
 def test_unknown_path_404(running_server):
     base, _ = running_server
     with pytest.raises(urllib.error.HTTPError) as excinfo:
