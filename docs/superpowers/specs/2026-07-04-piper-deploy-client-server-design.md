@@ -110,8 +110,9 @@ whatever env the launcher activates.
   2. When consumed fraction ≥ `--chunk_threshold` (default 0.5) and no
      request is in flight, capture a fresh observation and `POST /predict`
      in a background thread; record the queue index at capture time.
-  3. When the reply arrives, drop the first `elapsed_ticks` actions of the
-     new chunk and replace the remaining queue with it.
+  3. When the reply arrives, drop the rows already executed from the old
+     queue during flight (held/dry ticks consume none) and replace the
+     remaining queue with the rest; a fully-stale chunk logs a warning.
 - Grippers/joints: actions are sent via `robot.send_action` with the same
   ordering as `observation.state` (the lerobot piper convention).
 
