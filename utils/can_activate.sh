@@ -47,7 +47,7 @@ if [ "$CURRENT_CAN_COUNT" -ne "1" ]; then
         done
         echo -e " Error: The number of CAN modules detected by the system ($CURRENT_CAN_COUNT) does not match the expected number (1). "
         echo -e " Please add the USB hardware address parameter, such as: "
-        echo -e " bash can_activate.sh can0 1000000 1-2:1.0"
+        echo -e " bash utils/can_activate.sh can0 1000000 1-2:1.0"
         echo "-------------------ERROR-----------------------"
         exit 1
     fi

@@ -173,10 +173,31 @@ class OpenCVCamera(Camera):
         self._configure_capture_settings()
 
         if warmup:
+            # USB cameras (especially uncompressed streams on a busy bus) can be slow
+            # to start isochronous transfer, so the first reads may time out. Tolerate
+            # transient read failures and only fail if NO frame arrives within a window.
+            connect_timeout_s = max(self.warmup_s, 5.0)
             start_time = time.time()
-            while time.time() - start_time < self.warmup_s:
-                self.read()
+            got_frame = False
+            last_err: Exception | None = None
+            while time.time() - start_time < connect_timeout_s:
+                try:
+                    self.read()
+                    got_frame = True
+                    if time.time() - start_time >= self.warmup_s:
+                        break
+                except RuntimeError as e:
+                    last_err = e
                 time.sleep(0.1)
+
+            if not got_frame:
+                self.videocapture.release()
+                self.videocapture = None
+                raise ConnectionError(
+                    f"{self} opened but delivered no frames within {connect_timeout_s:.0f}s. "
+                    f"This usually means the USB bus can't supply the requested bandwidth "
+                    f"(e.g. too many uncompressed cameras on one controller). Last error: {last_err}"
+                )
 
         logger.info(f"{self} connected.")
 

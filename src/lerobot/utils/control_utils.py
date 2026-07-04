@@ -135,6 +135,8 @@ def init_keyboard_listener():
     events["exit_early"] = False
     events["rerecord_episode"] = False
     events["stop_recording"] = False
+    # Set by the space bar to gate the start of each episode (press SPACE to begin).
+    events["start_episode"] = False
 
     if is_headless():
         logging.warning(
@@ -159,6 +161,9 @@ def init_keyboard_listener():
                 print("Escape key pressed. Stopping data recording...")
                 events["stop_recording"] = True
                 events["exit_early"] = True
+            elif key == keyboard.Key.space:
+                print("Space key pressed. Starting episode...")
+                events["start_episode"] = True
         except Exception as e:
             print(f"Error handling key press: {e}")
 
