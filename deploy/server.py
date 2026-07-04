@@ -1,0 +1,106 @@
+"""Policy inference server for Piper deployment.
+
+stdlib + numpy only, so it runs inside ANY conda env — launch it from the env
+the policy needs and point the client at it.
+
+Usage:
+    python -m deploy.server --adapter=lerobot --port=8080 \
+        --checkpoint=outputs/train/.../pretrained_model --device=cuda --fps=30
+
+Flags other than --adapter/--host/--port are forwarded to the adapter
+constructor as string keyword arguments.
+
+Endpoints:
+    GET  /info     -> adapter.info() as JSON
+    POST /predict  -> body: protocol.encode_observation(...); reply: encode_chunk(...)
+    POST /reset    -> clears adapter episode state
+Any adapter exception -> HTTP 500 with the traceback as text; the server stays up.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import traceback
+from argparse import ArgumentParser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from deploy import protocol
+from deploy.adapters import make_adapter
+
+
+def make_handler(adapter):
+    lock = threading.Lock()  # serialize GPU inference across connections
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _send(self, code: int, body: bytes, content_type="application/octet-stream"):
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path == "/info":
+                self._send(200, json.dumps(adapter.info()).encode(), "application/json")
+            else:
+                self._send(404, b"not found", "text/plain")
+
+        def do_POST(self):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                if self.path == "/predict":
+                    images, state, task = protocol.decode_observation(body)
+                    with lock:
+                        chunk = adapter.predict_chunk(images, state, task)
+                    self._send(200, protocol.encode_chunk(chunk))
+                elif self.path == "/reset":
+                    with lock:
+                        adapter.reset()
+                    self._send(200, b"", "text/plain")
+                else:
+                    self._send(404, b"not found", "text/plain")
+            except Exception:
+                self._send(500, traceback.format_exc().encode(), "text/plain")
+
+        def log_message(self, fmt, *args):
+            pass  # keep per-request noise out of the console
+
+    return Handler
+
+
+def create_server(adapter, host: str = "127.0.0.1", port: int = 8080) -> ThreadingHTTPServer:
+    return ThreadingHTTPServer((host, port), make_handler(adapter))
+
+
+def parse_args(argv=None):
+    parser = ArgumentParser(description="Piper deploy policy server")
+    parser.add_argument("--adapter", required=True, help="adapter name, e.g. lerobot")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8080)
+    args, extra = parser.parse_known_args(argv)
+    kwargs = {}
+    for item in extra:
+        if not (item.startswith("--") and "=" in item):
+            parser.error(f"adapter flags must look like --key=value, got: {item}")
+        key, value = item[2:].split("=", 1)
+        kwargs[key] = value
+    return args, kwargs
+
+
+def main(argv=None):
+    args, kwargs = parse_args(argv)
+    adapter = make_adapter(args.adapter, **kwargs)
+    print(f"[deploy.server] adapter={args.adapter} info={adapter.info()}")
+    server = create_server(adapter, args.host, args.port)
+    print(f"[deploy.server] listening on http://{args.host}:{args.port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[deploy.server] shutting down")
+
+
+if __name__ == "__main__":
+    main()
