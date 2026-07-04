@@ -1,7 +1,9 @@
 """Generic adapter for ANY lerobot policy checkpoint (smolvla, act, pi05, ...).
 
-Run the server from a conda env that can import this repo's lerobot
-(PYTHONPATH=<repo>/src:<repo>) plus the policy's own deps.
+Run the server from a conda env whose lerobot version MATCHES the one that
+trained the checkpoint (a newer lerobot writes config fields an older one
+refuses to parse). PYTHONPATH only needs the repo root for `deploy`; add
+<repo>/src too only if the checkpoint was trained with this checkout's lerobot.
 
 The checkpoint may be a Hub id (samithva/smolvla_bimanual_stack_cup_bowl) or a
 local path (outputs/train/<job>/checkpoints/last/pretrained_model).
@@ -49,9 +51,29 @@ class LerobotAdapter(PolicyAdapter):
             for key, feat in pcfg.input_features.items()
             if feat.type == FeatureType.VISUAL
         ]
-        self._state_dim = pcfg.input_features["observation.state"].shape[0]
-        self._action_dim = pcfg.output_features["action"].shape[0]
+        self._state_dim = self._true_dim("observation.state", pcfg.input_features["observation.state"].shape[0])
+        self._action_dim = self._true_dim("action", pcfg.output_features["action"].shape[0])
         self._chunk_size = int(getattr(pcfg, "chunk_size", getattr(pcfg, "n_action_steps", 1)))
+
+    def _true_dim(self, key: str, config_dim: int) -> int:
+        """The saved config's feature shapes can be stale: fine-tuning with
+        --policy.path may keep the base model's input_features (e.g. state [6]
+        from smolvla_base) even though training normalized against the new
+        dataset's dims. The normalizer stats are written from the actual
+        training data, so they are the source of truth when they disagree."""
+        for pipeline in (self.preprocess, self.postprocess):
+            for step in getattr(pipeline, "steps", []):
+                stats = getattr(step, "stats", None) or {}
+                mean = stats.get(key, {}).get("mean")
+                if mean is not None and getattr(mean, "shape", None):
+                    stats_dim = int(mean.shape[0])
+                    if stats_dim != config_dim:
+                        print(
+                            f"[deploy.lerobot] config says {key} dim {config_dim}, "
+                            f"normalizer stats say {stats_dim} — using {stats_dim}"
+                        )
+                    return stats_dim
+        return config_dim
 
     def info(self) -> dict:
         return {

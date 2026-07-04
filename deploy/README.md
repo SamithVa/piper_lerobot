@@ -25,12 +25,17 @@ bash deploy/run_client.sh "Stack the cup on top of the bowl." 60
 The `lerobot` adapter serves any lerobot policy (smolvla / act / pi05):
 
 ```bash
-PYTHONPATH=src:. <env-python> -m deploy.server --adapter=lerobot \
+PYTHONPATH=. <env-python> -m deploy.server --adapter=lerobot \
     --checkpoint=<hub-id-or-local-path> --device=cuda --fps=30
 ```
 
-Pick `<env-python>` = the env that can run that policy (pi05 needs the patched
-transformers fork env, etc.).
+Pick `<env-python>` = an env whose **lerobot version matches the one that
+trained the checkpoint** (a newer lerobot writes config fields an older one
+refuses to parse). Checkpoints from `train_smolvla_bimanual.sh` / bare
+`lerobot-train` were trained by the lerobot env's installed lerobot, so
+`PYTHONPATH=.` (repo root only). Add `src` in front (`PYTHONPATH=src:.`) only
+for checkpoints trained with this checkout's lerobot (e.g. pi05 via
+`python src/lerobot/scripts/lerobot_train.py`).
 
 ## Adding a NON-lerobot policy (openpi, GR00T, ...)
 
