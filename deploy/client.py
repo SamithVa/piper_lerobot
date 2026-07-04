@@ -1,0 +1,199 @@
+"""Robot-side deployment client for the Piper arms.
+
+Runs in base python (piper_sdk + cameras) with this repo's lerobot on the
+path; talks to a deploy.server over HTTP. Async-overlap execution: while a
+chunk is being executed, the next observation is sent ~halfway through so the
+arms never pause for inference.
+
+Example (bimanual):
+    PYTHONPATH=src:. /home/embodied/miniconda3/bin/python -m deploy.client \
+        --robot.type=bi_piper_follower \
+        --robot.id=bi_piper \
+        --robot.cameras='{"top": {"type": "opencv", ...}, ...}' \
+        --server=http://127.0.0.1:8080 \
+        --task="Stack the cup on top of the bowl." \
+        --camera_map='{"top": "camera1", "l_wrist": "camera2", "r_wrist": "camera3"}' \
+        --duration_s=60
+"""
+import json
+import logging
+import threading
+import time
+import urllib.request
+from dataclasses import dataclass, field
+
+import draccus
+import numpy as np
+
+from deploy import protocol
+from deploy.chunking import ChunkExecutor
+from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
+from lerobot.robots import (  # noqa: F401  (register robot configs)
+    RobotConfig,
+    bi_piper_follower,
+    make_robot_from_config,
+    piper_follower,
+)
+from lerobot.utils.utils import init_logging
+
+# ---------- pure helpers (unit-tested) ----------
+
+
+def build_state(obs: dict, motor_keys: list[str]) -> np.ndarray:
+    """Observation dict -> state vector in the same motor order recording used."""
+    return np.array([obs[key] for key in motor_keys], dtype=np.float32)
+
+
+def build_images(obs: dict, camera_map: dict[str, str]) -> dict[str, np.ndarray]:
+    """{robot_cam_name: policy_image_key} -> {policy_image_key: image}."""
+    return {policy_key: obs[cam] for cam, policy_key in camera_map.items()}
+
+
+def action_to_dict(row: np.ndarray, motor_keys: list[str]) -> dict[str, float]:
+    return {key: float(value) for key, value in zip(motor_keys, row)}
+
+
+def resolve_camera_map(
+    camera_map: dict[str, str], policy_keys: list[str], robot_cams: list[str]
+) -> dict[str, str]:
+    """Validate/derive the robot-camera -> policy-key mapping before touching arms."""
+    if not camera_map:
+        camera_map = {key: key for key in policy_keys if key in robot_cams}
+    unknown = [cam for cam in camera_map if cam not in robot_cams]
+    if unknown:
+        raise ValueError(f"camera_map names robot cameras that don't exist: {unknown} (robot has {robot_cams})")
+    uncovered = [key for key in policy_keys if key not in camera_map.values()]
+    if uncovered:
+        raise ValueError(
+            f"camera_map does not provide policy image keys: {uncovered}. "
+            f"Pass --camera_map mapping robot cameras {robot_cams} onto them."
+        )
+    return camera_map
+
+
+# ---------- HTTP ----------
+
+
+def http_get_json(url: str, timeout: float = 10.0) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def http_post(url: str, body: bytes = b"", timeout: float = 15.0) -> bytes:
+    req = urllib.request.Request(url, data=body, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+# ---------- main loop ----------
+
+
+@dataclass
+class DeployClientConfig:
+    robot: RobotConfig
+    server: str = "http://127.0.0.1:8080"
+    task: str = ""
+    duration_s: float = 60.0
+    fps: float = 0.0  # 0 -> use the server's fps
+    chunk_threshold: float = 0.5
+    predict_timeout_s: float = 15.0
+    # {"robot_cam_name": "policy_image_key"}, e.g. {"top": "camera1"}
+    camera_map: dict[str, str] = field(default_factory=dict)
+
+
+def capture_payload(robot, camera_map, motor_keys, task) -> bytes:
+    obs = robot.get_observation()
+    return protocol.encode_observation(
+        build_images(obs, camera_map), build_state(obs, motor_keys), task
+    )
+
+
+@draccus.wrap()
+def main(cfg: DeployClientConfig):
+    init_logging()
+
+    info = http_get_json(cfg.server + "/info")
+    logging.info(f"policy: {info}")
+    fps = cfg.fps or float(info["fps"])
+    period = 1.0 / fps
+
+    robot = make_robot_from_config(cfg.robot)
+    motor_keys = list(robot.action_features)
+    camera_map = resolve_camera_map(
+        cfg.camera_map, info["image_keys"], list(robot.cameras)
+    )
+    if info["state_dim"] != len(motor_keys):
+        raise SystemExit(
+            f"state_dim mismatch: policy expects {info['state_dim']}, robot has {len(motor_keys)} motors"
+        )
+    if info["action_dim"] != len(motor_keys):
+        raise SystemExit(
+            f"action_dim mismatch: policy outputs {info['action_dim']}, robot has {len(motor_keys)} motors"
+        )
+
+    robot.connect()
+    executor = ChunkExecutor(cfg.chunk_threshold)
+    pending: dict = {}  # worker thread -> loop: {"chunk": ...} or {"error": ...}
+
+    def post_predict_async(payload: bytes):
+        def work():
+            try:
+                raw = http_post(cfg.server + "/predict", payload, cfg.predict_timeout_s)
+                pending["chunk"] = protocol.decode_chunk(raw)
+            except Exception as exc:  # noqa: BLE001 — must never kill the worker silently
+                pending["error"] = exc
+
+        threading.Thread(target=work, daemon=True).start()
+
+    try:
+        http_post(cfg.server + "/reset")
+
+        # Blocking first chunk so the loop starts with actions in hand.
+        logging.info("requesting first chunk...")
+        payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
+        executor.mark_requested()
+        executor.on_chunk(
+            protocol.decode_chunk(http_post(cfg.server + "/predict", payload, cfg.predict_timeout_s))
+        )
+        logging.info(f"running at {fps:.0f} fps for {cfg.duration_s:.0f}s — Ctrl-C to stop")
+
+        last_action: dict | None = None
+        dry_ticks = 0
+        t_end = time.perf_counter() + cfg.duration_s
+        next_t = time.perf_counter()
+        while time.perf_counter() < t_end:
+            if "chunk" in pending:
+                executor.on_chunk(pending.pop("chunk"))
+            if "error" in pending:
+                logging.warning(f"/predict failed: {pending.pop('error')}")
+                executor.on_request_failed()
+
+            row = executor.next_action()
+            if row is not None:
+                last_action = action_to_dict(row, motor_keys)
+                robot.send_action(last_action)
+                dry_ticks = 0
+            elif last_action is not None:
+                robot.send_action(last_action)  # hold position while recovering
+                dry_ticks += 1
+                if dry_ticks % int(fps) == 1:
+                    logging.warning("action queue dry — holding position")
+
+            if executor.should_request():
+                payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
+                executor.mark_requested()
+                post_predict_async(payload)
+
+            next_t += period
+            delay = next_t - time.perf_counter()
+            if delay > 0:
+                time.sleep(delay)
+    except KeyboardInterrupt:
+        logging.info("interrupted — stopping")
+    finally:
+        robot.disconnect()
+        logging.info("robot disconnected")
+
+
+if __name__ == "__main__":
+    main()
