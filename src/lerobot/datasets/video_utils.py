@@ -628,6 +628,15 @@ class VideoEncodingManager:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # Let the background encoder finish its queue before the batch pass below
+        # reads image dirs / videos_tmp (also runs on ESC, Ctrl-C and exceptions).
+        encoder = getattr(self.dataset, "async_encoder", None)
+        if encoder is not None:
+            logging.info("Waiting for background video encoding to finish...")
+            encoder.wait_until_idle()
+            encoder.stop()
+            self.dataset.async_encoder = None
+
         # Handle any remaining episodes that haven't been batch encoded
         if self.dataset.episodes_since_last_encoding > 0:
             if exc_type is not None:
@@ -658,6 +667,11 @@ class VideoEncodingManager:
                         f"Cleaning up interrupted episode images for episode {interrupted_episode_index}, camera {key}"
                     )
                     shutil.rmtree(img_dir)
+
+        # Remove the pre-encoded video cache if nothing is left in it
+        videos_tmp = self.dataset.root / "videos_tmp"
+        if videos_tmp.is_dir() and not any(videos_tmp.iterdir()):
+            videos_tmp.rmdir()
 
         # Clean up any remaining images directory if it's empty
         img_dir = self.dataset.root / "images"

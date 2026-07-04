@@ -19,18 +19,12 @@ from dataclasses import dataclass
 from ..config import TeleoperatorConfig
 
 
-@TeleoperatorConfig.register_subclass("piper_leader")
+@TeleoperatorConfig.register_subclass("bi_piper_leader")
 @dataclass
-class PIPERLeaderConfig(TeleoperatorConfig):
-    # CAN interface name for this leader arm (see 99-piper-can.rules)
-    can_name: str = "left_leader"
+class BiPiperLeaderConfig(TeleoperatorConfig):
+    # CAN interface names for the two leader arms (see 99-piper-can.rules)
+    left_arm_can: str = "left_leader"
+    right_arm_can: str = "right_leader"
 
-    # EMA smoothing factor for joint actions read in get_action(). None disables
-    # smoothing. In (0, 1]: smaller = smoother but laggier. At a 30 fps teleop
-    # loop, lag ≈ (1-α)/α frames: 0.5 → ~33 ms, 0.4 → ~50 ms, 0.2 → ~130 ms.
-    # The gripper channel is never smoothed (would delay open/close timing).
+    # EMA smoothing factor forwarded to both arms (see PIPERLeaderConfig.ema_alpha).
     ema_alpha: float | None = None
-
-    def validate_ema_alpha(self) -> None:
-        if self.ema_alpha is not None and not 0.0 < self.ema_alpha <= 1.0:
-            raise ValueError(f"ema_alpha must be in (0, 1] or None, got {self.ema_alpha}")

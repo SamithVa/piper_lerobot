@@ -14,6 +14,11 @@ from .config_piper_follower import PIPERFollowerConfig
 
 logger = logging.getLogger(__name__)
 
+# How many enable+home attempts before giving up on a follower arm. A single miss
+# is usually a transient CAN/USB stall on the shared 2.0 hub; retrying in-process
+# clears it without crashing the whole record.
+ARM_READY_ATTEMPTS = 3
+
 def get_motor_names(arm: dict[str, Any]) -> list[str]:
     return [motor for arm_key, bus in arm.items() for motor in bus.motors]
 
@@ -26,7 +31,7 @@ class PIPERFollower(Robot):
         self.config = config
         self.bus = PiperMotorsBus(
             PiperMotorsBusConfig(
-                can_name="can_follower",
+                can_name=config.can_name,
                 motors={
                     "joint_1": (1, "agilex_piper"),
                     "joint_2": (2, "agilex_piper"),
@@ -123,26 +128,41 @@ class PIPERFollower(Robot):
                 "Piper is already connected. Do not run robot.connect() twice."
             )
 
-        self.bus.connect(enable=True)
+        # Enable the arm AND verify it actually reaches home -- together, with
+        # retries. bus.connect() confirms all motors enabled + feedback live;
+        # move_to_home() proves the arm accepts motion (reaches home). On the
+        # shared USB-2.0 CAN hub a transient stall can make one attempt miss
+        # (enable not sticking, or move commands not landing); a fresh enable+home
+        # almost always clears it. Retrying in-process automates the old "just
+        # rerun the script" instead of crashing on the first miss.
+        self._is_connected = True  # move_to_home()/read() require this; cleared on total failure
+        for attempt in range(ARM_READY_ATTEMPTS):
+            if self.bus.connect(enable=True) and self.bus.move_to_home():
+                self._is_calibrated = True
+                break
+            print(f"piper follower not ready (enable/home) — retry {attempt + 1}/{ARM_READY_ATTEMPTS} ...")
+        else:
+            self._is_connected = False
+            last = {k: round(v) for k, v in self.bus.read().items()}
+            raise DeviceNotConnectedError(
+                f"{self} did not reach home after {ARM_READY_ATTEMPTS} enable+home attempts "
+                f"(last joints={last}). Likely a CAN/USB stall on the shared 2.0 hub or an "
+                "unpowered/faulted arm — re-run utils/activate_all_can.sh and check power/CAN."
+            )
         print("piper follower connected")
 
         # connect cameras
         for name in self.cameras:
             self.cameras[name].connect()
-            self._is_connected = self._is_connected and self.cameras[name].is_connected
             print(f"camera {name} connected")
 
         print("All connected")
-        self._is_connected = True
-
-        self.calibrate()
 
     def disconnect(self) -> None:
-        """move to home position, disenable piper and cameras"""
-        self.bus.safe_disconnect()
-        print("piper disable after 5 seconds")
-        time.sleep(5)
-        self.bus.connect(enable=False)
+        """回 home 后软失能(阻尼缓慢放下, 避免自由落体), 再断开相机。"""
+        print("piper gently disabling (home + soft release)...")
+        self.bus.gentle_disable()
+        print("piper gently disabled")
 
         if len(self.cameras) > 0:
             for cam in self.cameras.values():
@@ -151,12 +171,22 @@ class PIPERFollower(Robot):
         self._is_connected = False
 
     def calibrate(self):
-        """move piper to the home position"""
+        """move piper to the home position (polled + verified, with retries)"""
         if not self._is_connected:
             raise ConnectionError()
 
-        self.bus.apply_calibration()
-        self._is_calibrated = True  # 标记为已标定
+        # move_to_home() drives to home and returns whether it was reached. Retry
+        # a few times: a single miss is usually a transient CAN/USB stall, not a
+        # dead arm. Only fail loudly (teleop would be broken) after exhausting.
+        for attempt in range(ARM_READY_ATTEMPTS):
+            if self.bus.move_to_home():
+                self._is_calibrated = True
+                return
+            print(f"piper follower re-home — retry {attempt + 1}/{ARM_READY_ATTEMPTS} ...")
+        raise DeviceNotConnectedError(
+            f"{self} did not reach home after {ARM_READY_ATTEMPTS} attempts -- the arm is "
+            "not accepting motion commands. Check power/CAN and retry."
+        )
 
     def get_observation(self) -> dict:
         """Capture current joint positions and camera images"""

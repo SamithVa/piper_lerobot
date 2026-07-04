@@ -27,8 +27,9 @@ pip install piper_sdk
 
 ````
 sudo apt install guvcview    #安装Guvcview
-guvcview --device=/dev/video6  # 测试wrist相机
-guvcview --device=/dev/video0  # 测试ground相机
+guvcview --device=/dev/l_wrist  # 测试l_wrist相机
+guvcview --device=/dev/top      # 测试top相机
+guvcview --device=/dev/r_wrist  # 测试r_wrist相机
 ````
 
 ## 3.连接机械臂
@@ -37,9 +38,9 @@ guvcview --device=/dev/video0  # 测试ground相机
 
 ````
 conda activate lerobot
-bash find_all_can_port.sh
-bash can_activate.sh can_master 1000000 "1-8.2:1.0"
-bash can_activate.sh can_follower 1000000 "1-8.3:1.0"
+bash utils/find_all_can_port.sh
+bash utils/can_activate.sh can_master 1000000 "1-8.2:1.0"
+bash utils/can_activate.sh can_follower 1000000 "1-8.3:1.0"
 ````
 
 
@@ -84,7 +85,7 @@ hf upload jokeru/pick_and_place ~/.cache/huggingface/lerobot/jokeru/pick_and_pla
 
 ## 6.采集数据集
 
-/dev/video0等参数改为自己对应的端口
+/dev/l_wrist等参数改为自己对应的端口（持久化符号链接，需先运行sudo bash utils/setup_camera_symlinks.sh）
 
 ````
 lerobot-record \
@@ -92,7 +93,7 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
+      "index_or_path": "/dev/l_wrist",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -100,7 +101,7 @@ lerobot-record \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video2",
+      "index_or_path": "/dev/top",
       "width": 640,
       "height": 480,
       "fps": 30,
@@ -160,11 +161,36 @@ vlc *.mp4
 ````
 
 
-## 8.全部失能
+## 8.软失能
 
 ````
-python utils/teleop_disable.py
+python utils/gentle_disable_arm.py
 ````
+
+### 失能指定机械臂
+
+只让指定 can 对应的机械臂软失能，can 名称参照 utils/cameras.md
+
+````
+python utils/gentle_disable_arm.py left_follower                # 失能单个机械臂
+python utils/gentle_disable_arm.py left_follower right_follower # 失能多个机械臂
+````
+
+### 软失能(避免机械臂掉落)
+
+直接失能会瞬间断电,机械臂仍在对抗重力,断电瞬间会硬砸下去。
+软失能流程: 先用位置控制缓慢回到 home 姿态,再用 MIT 力控保持当前关节角,
+把位置增益 kp 缓慢降到 0(保留阻尼 kd),机械臂被阻尼缓慢放下而不是自由落体,最后再真正失能。
+
+````
+python utils/gentle_disable_arm.py                        # 默认软失能全部 4 个机械臂
+python utils/gentle_disable_arm.py left_follower
+python utils/gentle_disable_arm.py left_follower --duration 3.0 --kp 12 --kd 1.2
+python utils/gentle_disable_arm.py left_follower --no-home   # 跳过回 home,从当前姿态软放下
+````
+
+kp/kd/duration 需在真机上微调: kd 越大放下越慢越软(过大会抖动), duration 为 kp 降到 0 的时长,
+--home-speed 为回 home 的速度百分比(默认 15,较慢)。
 
 ## 9.ACT
 ### 训练ACT
@@ -216,7 +242,7 @@ lerobot-record \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
+      "index_or_path": "/dev/l_wrist",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -224,7 +250,7 @@ lerobot-record \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video2",
+      "index_or_path": "/dev/top",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -308,7 +334,7 @@ python examples/rtc/eval_with_real_robot.py \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
+      "index_or_path": "/dev/l_wrist",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -316,7 +342,7 @@ python examples/rtc/eval_with_real_robot.py \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video2",
+      "index_or_path": "/dev/top",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -341,7 +367,7 @@ python examples/rtc/eval_with_real_robot.py \
   --robot.cameras='{
     "wrist": {
       "type": "opencv",
-      "index_or_path": "/dev/video0",
+      "index_or_path": "/dev/l_wrist",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -349,7 +375,7 @@ python examples/rtc/eval_with_real_robot.py \
     },
     "ground": {
       "type": "opencv",
-      "index_or_path": "/dev/video2",
+      "index_or_path": "/dev/top",
       "width": 480,
       "height": 640,
       "fps": 30,
@@ -361,7 +387,6 @@ python examples/rtc/eval_with_real_robot.py \
   --action_queue_size_to_get_new_actions=30 \
   --fps=50 \
   --rtc.execution_horizon=5 \
-  --display_data=true \
   --device=cuda
 ````
 

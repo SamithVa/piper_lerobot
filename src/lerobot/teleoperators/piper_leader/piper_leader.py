@@ -18,10 +18,12 @@ class PIPERLeader(Teleoperator):
 
     def __init__(self, config: PIPERLeaderConfig):
         super().__init__(config)
+        config.validate_ema_alpha()
         self.config = config
+        self._ema_state: dict[str, float] | None = None
         self.bus = PiperMotorsBus(
             PiperMotorsBusConfig(
-                can_name="can_master",
+                can_name=config.can_name,
                 motors={
                     "joint_1": (1, "agilex_piper"),
                     "joint_2": (2, "agilex_piper"),
@@ -69,8 +71,16 @@ class PIPERLeader(Teleoperator):
         if self._is_connected:
             raise DeviceAlreadyConnectedError(f"{self} already connected")
 
-        self.bus.connect(enable=True)
+        # Verify+retry enable: bus.connect() returns False on enable timeout, and
+        # a not-fully-enabled leader silently produces bad teleop actions.
+        for attempt in range(3):
+            if self.bus.connect(enable=True):
+                break
+            print(f"piper leader enable timed out, retry {attempt + 1}/3...")
+        else:
+            raise DeviceNotConnectedError(f"{self} failed to enable after 3 attempts.")
         self._is_connected = True
+        self._ema_state = None  # don't blend against positions from a previous connection
 
         if _is_calibrate:
             self.calibrate()
@@ -94,9 +104,22 @@ class PIPERLeader(Teleoperator):
             f"{motor}.pos": val / joint_factor if motor != "gripper" else val / 1_000_000
             for motor, val in action_raw.items()
         }
+        action = self._apply_ema(action)
         dt_ms = (time.perf_counter() - start) * 1e3
         logger.debug(f"{self} read action: {dt_ms:.1f}ms")
         return action
+
+    def _apply_ema(self, action: dict[str, float]) -> dict[str, float]:
+        """EMA-smooth joint actions (gripper passes through raw). No-op if ema_alpha is None."""
+        alpha = self.config.ema_alpha
+        if alpha is None:
+            return action
+        if self._ema_state is None:
+            self._ema_state = {k: v for k, v in action.items() if k != "gripper.pos"}
+            return action
+        for key, prev in self._ema_state.items():
+            self._ema_state[key] = alpha * action[key] + (1.0 - alpha) * prev
+        return {**action, **self._ema_state}
 
     def disconnect(self) -> None:
         """断开主臂连接"""

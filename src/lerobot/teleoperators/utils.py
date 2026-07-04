@@ -43,6 +43,11 @@ def make_teleoperator_from_config(config: TeleoperatorConfig) -> Teleoperator:
 
         return PIPERLeader(config)
 
+    elif config.type == "bi_piper_leader":
+        from .bi_piper_leader import BiPiperLeader
+
+        return BiPiperLeader(config)
+
     elif config.type == "koch_leader":
         from .koch_leader import KochLeader
 

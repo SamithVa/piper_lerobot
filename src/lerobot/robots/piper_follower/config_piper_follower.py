@@ -25,6 +25,8 @@ from ..config import RobotConfig
 @RobotConfig.register_subclass("piper_follower")
 @dataclass
 class PIPERFollowerConfig(RobotConfig):
+    # CAN interface name for this follower arm (see 99-piper-can.rules)
+    can_name: str = "left_follower"
     #cameras: dict[str, CameraConfig] = field(default_factory=dict)
     # # cameras
     cameras: dict[str, CameraConfig] = field(

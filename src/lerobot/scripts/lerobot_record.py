@@ -92,6 +92,7 @@ from lerobot.processor.rename_processor import rename_stats
 from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
+    bi_piper_follower,
     bi_so100_follower,
     hope_jr,
     koch_follower,
@@ -103,6 +104,7 @@ from lerobot.robots import (  # noqa: F401
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
     TeleoperatorConfig,
+    bi_piper_leader,
     bi_so100_leader,
     homunculus,
     koch_leader,
@@ -166,6 +168,10 @@ class DatasetRecordConfig:
     # Number of episodes to record before batch encoding videos
     # Set to 1 for immediate encoding (default behavior), or higher for batched encoding
     video_encoding_batch_size: int = 1
+    # With batched encoding: pre-encode each episode's videos in a background thread while
+    # the next episodes are being recorded, so the batch pass only concatenates (no long
+    # end-of-session encode wait).
+    async_video_encoding: bool = False
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
 
@@ -403,6 +409,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             cfg.dataset.repo_id,
             root=cfg.dataset.root,
             batch_encoding_size=cfg.dataset.video_encoding_batch_size,
+            async_video_encoding=cfg.dataset.async_video_encoding,
         )
 
         if hasattr(robot, "cameras") and len(robot.cameras) > 0:
@@ -424,6 +431,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             image_writer_processes=cfg.dataset.num_image_writer_processes,
             image_writer_threads=cfg.dataset.num_image_writer_threads_per_camera * len(robot.cameras),
             batch_encoding_size=cfg.dataset.video_encoding_batch_size,
+            async_video_encoding=cfg.dataset.async_video_encoding,
         )
 
     # Load pretrained policy
@@ -450,6 +458,23 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     with VideoEncodingManager(dataset):
         recorded_episodes = 0
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
+            # Gate the start of each episode on a key press so the operator can get
+            # ready. Press SPACE to begin recording; ESC still stops the session.
+            if listener is not None:
+                events["start_episode"] = False
+                log_say("Press space to start recording", cfg.play_sounds)
+                logging.info(
+                    f"Ready — press SPACE to start recording episode {dataset.num_episodes} "
+                    f"(ESC to stop)."
+                )
+                while not events["start_episode"] and not events["stop_recording"]:
+                    time.sleep(0.02)
+                if events["stop_recording"]:
+                    break
+            else:
+                # Headless / no key listener: fall back to a blocking prompt.
+                input(f"Press Enter to start recording episode {dataset.num_episodes}... ")
+
             log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
             record_loop(
                 robot=robot,

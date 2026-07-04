@@ -1,0 +1,16 @@
+# Runtime for pi05_deploy (Python 3.10, Linux x86-64).
+#
+# Install from the bundled pre-built wheels — no git URLs, no source repo:
+#     pip install -r requirements.txt
+#
+# The two wheels in ./wheels/ are the LeRobot fork (v0.4.2: pi05 + piper) and the
+# patched transformers fork pi0.5 needs. Installing lerobot WITHOUT its [pi] extra
+# keeps the transformers git URL out; we provide that fork as a wheel instead.
+# All remaining dependencies (torch, datasets, ...) resolve from PyPI.
+
+./wheels/lerobot-0.4.2-py3-none-any.whl
+./wheels/transformers-4.53.3-py3-none-any.whl
+
+torch==2.7.0
+numpy==1.26.4
+pillow>=10.0
