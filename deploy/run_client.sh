@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run the Piper deployment client (base python: piper_sdk + cameras).
+# Run the Piper deployment client (pyAgxArm + cameras).
 # Usage: bash deploy/run_client.sh ["task"] [duration_s] [server]
 set -e
 REPO=/data/wanshan/VLAs/piper_lerobot

@@ -14,7 +14,7 @@ It reports, per device:
 Finally it sums camera demand per USB controller and compares it to the
 practical USB 2.0 ceiling, and (optionally) does a real simultaneous-open test.
 
-No root needed. Run in an env with piper_sdk + opencv (e.g. base python):
+No root needed. Run in an env with pyAgxArm + opencv (e.g. the lerobot env):
     python utils/bandwidth_debug.py
     python utils/bandwidth_debug.py --cams /dev/l_wrist /dev/top /dev/r_wrist
     python utils/bandwidth_debug.py --width 640 --height 480 --secs 3

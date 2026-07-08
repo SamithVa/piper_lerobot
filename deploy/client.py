@@ -1,6 +1,6 @@
 """Robot-side deployment client for the Piper arms.
 
-Runs in base python (piper_sdk + cameras) with this repo's lerobot on the
+Runs with pyAgxArm + cameras and this repo's lerobot on the
 path; talks to a deploy.server over HTTP. Async-overlap execution: while a
 chunk is being executed, the next observation is sent ~halfway through so the
 arms never pause for inference.
