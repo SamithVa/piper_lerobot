@@ -16,35 +16,39 @@ Usage:
 import sys
 import time
 
-from piper_sdk import C_PiperInterface_V2
+from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, PiperFW
 
 DEFAULT_CANS = ["can_master", "can_follower", "can_master2", "can_follower2"]
-JOINT_FACTOR = 57324.840764  # rad -> 0.001 deg
-HOME = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # 6 joints + gripper
 GAP_S = 5
 
 
-def enable(piper, timeout=5):
+def make_robot(can):
+    cfg = create_agx_arm_config(
+        robot=ArmModel.PIPER,
+        firmeware_version=PiperFW.V188,
+        interface="socketcan",
+        channel=can,
+    )
+    robot = AgxArmFactory.create_arm(cfg)
+    gripper = robot.init_effector(robot.OPTIONS.EFFECTOR.AGX_GRIPPER)
+    robot.connect()
+    return robot, gripper
+
+
+def enable(robot, timeout=5):
     start = time.time()
     while time.time() - start < timeout:
-        st = piper.GetArmLowSpdInfoMsgs()
-        enabled = all(
-            getattr(st, f"motor_{i}").foc_status.driver_enable_status
-            for i in range(1, 7)
-        )
-        if enabled:
+        if robot.get_joint_enable_status(255):
             return True
-        piper.EnablePiper()
+        robot.enable(255)
         time.sleep(0.2)
     return False
 
 
-def home(piper):
-    j = [round(HOME[i] * JOINT_FACTOR) for i in range(6)]
-    grip = round(HOME[6] * 1000 * 1000)
-    piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)  # position control, speed 50%
-    piper.JointCtrl(*j)
-    piper.GripperCtrl(abs(grip), 1000, 0x01, 0)
+def home(robot, gripper):
+    robot.set_speed_percent(50)  # position control, speed 50%
+    robot.move_j([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    gripper.move_gripper_m(0.0, 1.0)
 
 
 def main(cans):
@@ -53,12 +57,11 @@ def main(cans):
         print(f">>> Arm {idx + 1}/{len(cans)}  ->  CAN = {can}")
         print("=" * 50)
         try:
-            piper = C_PiperInterface_V2(can)
-            piper.ConnectPort()
+            robot, gripper = make_robot(can)
             time.sleep(0.5)
-            if not enable(piper):
+            if not enable(robot):
                 print(f"[WARN] {can}: enable timed out (arm powered on / CAN up?)")
-            home(piper)
+            home(robot, gripper)
             print(f"    {can}: home command sent. WATCH which arm moves now.")
         except Exception as e:
             print(f"[ERROR] {can}: {e}")
