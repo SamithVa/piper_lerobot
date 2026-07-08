@@ -3,14 +3,14 @@
 """
 Read-only monitor of both leader grippers. Moves nothing.
 
-Squeeze each leader gripper fully closed, then fully open, and watch the raw
-angle. A healthy leader reads ~0 when closed and ~70000 (0.001mm units, ~70mm)
-when open. If a leader never drops near 0 when you close it, its zero point is
-offset -> the follower is commanded to stay open (that's the bug, on the LEADER).
+Squeeze each leader gripper fully closed, then fully open, and watch the value.
+A healthy leader reads ~0.0 m when closed and ~0.07 m when open. If a leader
+never drops near 0 when you close it, its zero point is offset -> the follower is
+commanded to stay open (that's the bug, on the LEADER).
 
 The "-> follower cmd" column is exactly what the record pipeline would send:
-    action = raw / 1e6   (piper_leader.get_action)
-    follower GripperCtrl(round(action * 1e6)) == raw   (round-trip)
+    action = value (meters, from get_gripper_status().msg.value)
+    follower move_gripper_m(value) == same width   (round-trip)
 
 Usage:
     python utils/watch_leader_grippers.py
@@ -19,12 +19,26 @@ Usage:
 import argparse
 import time
 
-from piper_sdk import C_PiperInterface_V2
+from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, PiperFW
 
 
-def read_angle(piper):
+def make_gripper(can):
+    cfg = create_agx_arm_config(
+        robot=ArmModel.PIPER,
+        firmeware_version=PiperFW.V188,
+        interface="socketcan",
+        channel=can,
+    )
+    robot = AgxArmFactory.create_arm(cfg)
+    gripper = robot.init_effector(robot.OPTIONS.EFFECTOR.AGX_GRIPPER)
+    robot.connect()
+    return robot, gripper
+
+
+def read_value(gripper):
     try:
-        return piper.GetArmGripperMsgs().gripper_state.grippers_angle
+        gs = gripper.get_gripper_status()
+        return gs.msg.value if gs is not None else "no fb"
     except Exception as e:
         return f"err:{e}"
 
@@ -35,21 +49,19 @@ def main():
     ap.add_argument("--right", default="right_leader")
     args = ap.parse_args()
 
-    left = C_PiperInterface_V2(args.left, judge_flag=True)
-    right = C_PiperInterface_V2(args.right, judge_flag=True)
-    left.ConnectPort()
-    right.ConnectPort()
+    _, left = make_gripper(args.left)
+    _, right = make_gripper(args.right)
     time.sleep(0.3)
 
     print("Close then open each leader gripper. Ctrl-C to stop.\n")
-    print(f"{'left raw':>12} {'-> foll cmd':>12}   |  {'right raw':>12} {'-> foll cmd':>12}")
+    print(f"{'left value(m)':>14} {'-> foll cmd':>12}   |  {'right value(m)':>14} {'-> foll cmd':>12}")
     try:
         while True:
-            lr = read_angle(left)
-            rr = read_angle(right)
-            lc = lr / 1e6 if isinstance(lr, int) else lr
-            rc = rr / 1e6 if isinstance(rr, int) else rr
-            print(f"{lr:>12} {lc:>12}   |  {rr:>12} {rc:>12}")
+            lv = read_value(left)
+            rv = read_value(right)
+            lc = lv if isinstance(lv, float) else lv
+            rc = rv if isinstance(rv, float) else rv
+            print(f"{lv:>14} {lc:>12}   |  {rv:>14} {rc:>12}")
             time.sleep(0.2)
     except KeyboardInterrupt:
         print("\nstopped.")
