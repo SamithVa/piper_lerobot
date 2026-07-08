@@ -2,8 +2,8 @@
 """Regression tests for PiperMotorsBus.connect() cold-start readiness.
 
 Root cause guarded here: connect() must not report success until the arm is
-actually READY and STAYS ready -- all 6 drivers enabled AND joint feedback live
-(GetArmJointMsgs().Hz > 0), held continuously for a settle window. Declaring
+actually READY and STAYS ready -- all joints enabled AND joint feedback live
+(get_joint_angles().hz > 0), held continuously for a settle window. Declaring
 success on a single lucky sample causes the intermittent "follower sometimes not
 activated -> leader can't control it" / "works on the 2nd run".
 
@@ -21,56 +21,81 @@ def _resolve(v):
     return v() if callable(v) else v
 
 
-class FakePiper:
-    """Stand-in for C_PiperInterface_V2 driving connect()'s branches.
+class _Msg:
+    """Stand-in for pyAgxArm MessageAbstract (.msg / .hz / .timestamp)."""
+
+    def __init__(self, msg, hz=30.0):
+        self.msg = msg
+        self.hz = hz
+        self.timestamp = 0.0
+
+
+class FakeRobot:
+    """Stand-in for the pyAgxArm arm driver driving connect()'s branches.
 
     `enabled` / `joint_hz` may be constants or zero-arg callables (evaluated per
-    read) to simulate flicker / feedback coming up late.
+    read) to simulate enable flicker / feedback coming up late.
     """
 
     def __init__(self, *, enabled=True, joint_hz=30.0, moves=True):
         self._enabled = enabled
         self._joint_hz = joint_hz
         self._moves = moves
-        # Start far from home (raw units 0.001 deg); ~57000 raw ~= 1 rad.
-        self._joints_raw = [57000] * 6
+        # Start ~1 rad from home so move_to_home has to actually drive there.
+        self._joints_rad = [1.0] * 6
 
-    def GetArmLowSpdInfoMsgs(self):
-        en = _resolve(self._enabled)
-        motor = SimpleNamespace(foc_status=SimpleNamespace(driver_enable_status=en))
-        return SimpleNamespace(**{f"motor_{i}": motor for i in range(1, 7)})
-
-    def GetArmJointMsgs(self):
-        js = SimpleNamespace(**{f"joint_{i}": self._joints_raw[i - 1] for i in range(1, 7)})
-        return SimpleNamespace(Hz=_resolve(self._joint_hz), joint_state=js)
-
-    def GetArmStatus(self):
-        return SimpleNamespace(arm_status=SimpleNamespace(ctrl_mode=0x01, arm_status=0x00))
-
-    def JointCtrl(self, *targets):
-        # A responsive arm in position mode tracks the commanded target.
-        if self._moves:
-            self._joints_raw = list(targets)
-
-    def MotionCtrl_2(self, *args):
-        pass
-
-    def EnablePiper(self):
-        # Mirrors the real SDK: returns whether all motors ALREADY report enabled.
+    def _en(self):
         return bool(_resolve(self._enabled))
 
-    def GripperCtrl(self, *args):
+    def get_joint_enable_status(self, joint_index=255):
+        return self._en()
+
+    def get_joints_enable_status_list(self):
+        return [self._en()] * 6
+
+    def enable(self, joint_index=255):
+        return self._en()
+
+    def disable(self, joint_index=255):
+        return True
+
+    def set_speed_percent(self, pct):
         pass
 
-    def DisableArm(self, *args):
+    def get_joint_angles(self):
+        return _Msg(list(self._joints_rad), hz=_resolve(self._joint_hz))
+
+    def get_arm_status(self):
+        return _Msg(SimpleNamespace(ctrl_mode=0x01, arm_status=0x00))
+
+    def move_j(self, joints):
+        if self._moves:
+            self._joints_rad = [float(x) for x in joints]
+
+    def move_mit(self, **kwargs):
         pass
 
 
-def _make_bus(fake: FakePiper) -> PiperMotorsBus:
-    # Bypass __init__: the real one constructs C_PiperInterface_V2 + ConnectPort(),
-    # which needs live CAN hardware. We only exercise connect()/readiness logic.
+class FakeGripper:
+    """Stand-in for the pyAgxArm gripper effector driver."""
+
+    def move_gripper_m(self, value=0.0, force=1.0):
+        pass
+
+    def get_gripper_status(self):
+        return _Msg(SimpleNamespace(value=0.0, force=0.0, mode="width", foc_status=None))
+
+    def disable_gripper(self):
+        return True
+
+
+def _make_bus(robot: FakeRobot, gripper: FakeGripper | None = None) -> PiperMotorsBus:
+    # Bypass __init__: the real one constructs the pyAgxArm driver + effector and
+    # calls robot.connect(), which needs live CAN hardware. We only exercise
+    # connect()/readiness/home logic against the fakes.
     bus = object.__new__(PiperMotorsBus)
-    bus.piper = fake
+    bus.robot = robot
+    bus.gripper = gripper if gripper is not None else FakeGripper()
     bus.motors = {f"joint_{i}": (i, "agilex_piper") for i in range(1, 7)}
     return bus
 
@@ -78,31 +103,31 @@ def _make_bus(fake: FakePiper) -> PiperMotorsBus:
 # --- full connect() integration checks -------------------------------------
 
 def test_connect_fails_when_feedback_not_flowing():
-    """Enabled but joint stream dead (Hz==0) -> report failure so the caller's
+    """Enabled but joint stream dead (hz==0) -> report failure so the caller's
     retry re-runs connect() instead of streaming stale zeros."""
-    bus = _make_bus(FakePiper(enabled=True, joint_hz=0.0))
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=0.0))
     assert bus.connect(enable=True) is False
 
 
 def test_connect_succeeds_when_enabled_and_feedback_live():
-    bus = _make_bus(FakePiper(enabled=True, joint_hz=30.0))
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=30.0))
     assert bus.connect(enable=True) is True
 
 
 # --- readiness-gate unit checks (fast, no 10s enable loop) ------------------
 
 def test_is_ready_false_when_disabled():
-    bus = _make_bus(FakePiper(enabled=False, joint_hz=30.0))
+    bus = _make_bus(FakeRobot(enabled=False, joint_hz=30.0))
     assert bus.is_ready() is False
 
 
 def test_is_ready_false_when_feedback_dead():
-    bus = _make_bus(FakePiper(enabled=True, joint_hz=0.0))
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=0.0))
     assert bus.is_ready() is False
 
 
 def test_wait_until_ready_true_when_stable():
-    bus = _make_bus(FakePiper(enabled=True, joint_hz=30.0))
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=30.0))
     assert bus._wait_until_ready(timeout=2.0, stable_needed=0.3) is True
 
 
@@ -115,34 +140,34 @@ def test_wait_until_ready_false_on_enable_flicker():
         flip["n"] += 1
         return flip["n"] % 2 == 0  # alternates True/False
 
-    bus = _make_bus(FakePiper(enabled=flicker, joint_hz=30.0))
+    bus = _make_bus(FakeRobot(enabled=flicker, joint_hz=30.0))
     assert bus._wait_until_ready(timeout=0.6, stable_needed=0.3) is False
 
 
 # --- polled home checks (the "follower must reach home" root cause) ----------
 
 def test_move_to_home_true_when_arm_accepts_motion():
-    """Responsive arm: repeated JointCtrl(0) drives joints to home -> True."""
-    bus = _make_bus(FakePiper(moves=True))
+    """Responsive arm: repeated move_j([0]*6) drives joints to home -> True."""
+    bus = _make_bus(FakeRobot(moves=True))
     assert bus.move_to_home(timeout=2.0) is True
 
 
 def test_move_to_home_false_when_arm_ignores_motion():
-    """Arm stuck in a non-position mode ignores JointCtrl -> never reaches home,
-    so calibration reports failure instead of starting dead teleop."""
-    bus = _make_bus(FakePiper(moves=False))
+    """Arm stuck / ignoring motion never reaches home, so calibration reports
+    failure instead of starting dead teleop."""
+    bus = _make_bus(FakeRobot(moves=False))
     assert bus.move_to_home(timeout=0.4) is False
 
 
 # --- enable-loop must not hang forever ---------------------------------------
 
 def test_connect_terminates_when_enable_never_succeeds():
-    """Arm that never reports enabled (EnablePiper stays False) must NOT hang in
-    the inner 'while not EnablePiper()' loop -- it must time out and return False
-    so the caller can retry / raise."""
+    """Arm that never reports enabled (enable() stays False) must NOT hang in the
+    inner 'while not robot.enable()' loop -- it must time out and return False so
+    the caller can retry / raise."""
     import time as _time
 
-    bus = _make_bus(FakePiper(enabled=False, joint_hz=0.0))
+    bus = _make_bus(FakeRobot(enabled=False, joint_hz=0.0))
     start = _time.time()
     result = bus.connect(enable=True, timeout=0.3)
     elapsed = _time.time() - start
