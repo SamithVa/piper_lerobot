@@ -3,15 +3,14 @@
 """
 Gently disable (软失能) a Piper arm so it does NOT free-fall.
 
-Sequence: (1) slowly move the arm to the home pose (all joints 0) with position
-control, then (2) softly release it.
+Sequence: (1) optionally move the arm slowly to home (all joints 0) with position
+control, then (2) softly release it via MIT control.
 
-Why: DisablePiper() cuts all motor torque instantly. At the home pose the arm
-is still holding itself against gravity, so it drops hard the moment torque is
-removed. This script first parks the arm at home, then uses MIT control to hold
-the current joint angles and ramps the position gain kp -> 0 while keeping a
-damping gain kd > 0. The arm slowly, dampedly droops under gravity (no slam),
-and is already limp by the time DisablePiper() is finally called.
+Why: disable() cuts all motor torque instantly. At the home pose the arm is still
+holding itself against gravity, so it drops hard the moment torque is removed.
+This script holds the current joint angles with MIT control and ramps the
+position gain kp -> 0 while keeping a damping gain kd > 0. The arm slowly,
+dampedly droops (no slam), and is already limp by the time disable() is called.
 
 Usage:
     python utils/gentle_disable_arm.py                       # all 4 arms (dual-arm)
@@ -27,64 +26,71 @@ Tuning on real hardware:
     --duration  seconds to ramp kp from --kp down to 0.
 """
 import argparse
-import math
 import time
 
-from piper_sdk import C_PiperInterface_V2
+from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, PiperFW
 
-# joint feedback is in 0.001 deg -> rad
-RAW_TO_RAD = 0.001 * math.pi / 180.0
 NUM_JOINTS = 6
 RATE_HZ = 100.0
 HOME_TOL_RAD = 0.05  # ~3 deg: consider "at home" when every joint is within this
 
 
-def read_joints_rad(piper):
-    js = piper.GetArmJointMsgs().joint_state
-    return [getattr(js, f"joint_{i}") * RAW_TO_RAD for i in range(1, NUM_JOINTS + 1)]
+def make_robot(can):
+    cfg = create_agx_arm_config(
+        robot=ArmModel.PIPER,
+        firmeware_version=PiperFW.V188,
+        interface="socketcan",
+        channel=can,
+    )
+    robot = AgxArmFactory.create_arm(cfg)
+    gripper = robot.init_effector(robot.OPTIONS.EFFECTOR.AGX_GRIPPER)
+    robot.connect()
+    return robot, gripper
 
 
-def enable(piper, timeout=3.0):
+def read_joints_rad(robot):
+    ja = robot.get_joint_angles()
+    return list(ja.msg) if ja is not None else [0.0] * NUM_JOINTS
+
+
+def enable(robot, timeout=3.0):
     """Make sure motors are enabled so we can take MIT control before releasing."""
     start = time.time()
     while time.time() - start < timeout:
-        if piper.EnablePiper():
+        if robot.enable(255):
             return True
         time.sleep(0.05)
     return False
 
 
-def move_to_home(piper, speed, timeout=10.0):
+def move_to_home(robot, gripper, speed, timeout=10.0):
     """Slowly move all joints to 0 with position control; wait until arrived."""
-    piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)  # position control, speed %
-    piper.JointCtrl(0, 0, 0, 0, 0, 0)
-    piper.GripperCtrl(0, 1000, 0x01, 0)
+    robot.set_speed_percent(speed)
     start = time.time()
     while time.time() - start < timeout:
-        if max(abs(a) for a in read_joints_rad(piper)) < HOME_TOL_RAD:
+        if max(abs(a) for a in read_joints_rad(robot)) < HOME_TOL_RAD:
             return True
-        piper.MotionCtrl_2(0x01, 0x01, speed, 0x00)
-        piper.JointCtrl(0, 0, 0, 0, 0, 0)
+        robot.move_j([0.0] * NUM_JOINTS)
+        gripper.move_gripper_m(0.0, 1.0)
         time.sleep(0.05)
     return False
 
 
 def gentle_disable(can, kp0, kd, duration, go_home, home_speed, settle=0.6):
-    piper = C_PiperInterface_V2(can, judge_flag=True)
-    piper.ConnectPort()
+    robot, gripper = make_robot(can)
     time.sleep(0.2)
 
-    if not enable(piper):
+    if not enable(robot):
         print(f"[WARN] {can}: could not confirm enable — arm may already be limp.")
 
     if go_home:
         print(f"{can}: moving to home (speed {home_speed}%)...")
-        if move_to_home(piper, home_speed):
+        if move_to_home(robot, gripper, home_speed):
             print(f"{can}: reached home.")
         else:
             print(f"[WARN] {can}: home move timed out — releasing from current pose.")
 
-    hold = read_joints_rad(piper)
+    hold = read_joints_rad(robot)
     print(f"{can}: holding {[round(a, 3) for a in hold]} rad, ramping kp {kp0}->0 over {duration}s")
 
     dt = 1.0 / RATE_HZ
@@ -93,22 +99,19 @@ def gentle_disable(can, kp0, kd, duration, go_home, home_speed, settle=0.6):
     # Phase 1: ramp kp -> 0 while damping (kd) resists any fall.
     for s in range(steps + 1):
         kp = kp0 * (1.0 - s / steps)  # linear fade to zero
-        piper.MotionCtrl_2(0x01, 0x04, 0, 0xAD)  # enter/keep MIT mode
         for j in range(NUM_JOINTS):
-            piper.JointMitCtrl(j + 1, hold[j], 0.0, kp, kd, 0.0)
+            robot.move_mit(joint_index=j + 1, p_des=hold[j], v_des=0.0, kp=kp, kd=kd, t_ff=0.0)
         time.sleep(dt)
 
     # Phase 2: kp = 0, keep only damping so it settles softly at the bottom.
     for _ in range(int(settle * RATE_HZ)):
-        piper.MotionCtrl_2(0x01, 0x04, 0, 0xAD)
         for j in range(NUM_JOINTS):
-            piper.JointMitCtrl(j + 1, hold[j], 0.0, 0.0, kd, 0.0)
+            robot.move_mit(joint_index=j + 1, p_des=hold[j], v_des=0.0, kp=0.0, kd=kd, t_ff=0.0)
         time.sleep(dt)
 
-    # Phase 3: fully release + restore position/speed control mode.
-    while piper.DisablePiper():
+    # Phase 3: fully release (next move_j restores position/speed control mode).
+    while not robot.disable(255):
         time.sleep(0.01)
-    piper.MotionCtrl_1(0x02, 0, 0)
     time.sleep(0.3)
     print(f"{can}: 软失能成功!!!!")
 
