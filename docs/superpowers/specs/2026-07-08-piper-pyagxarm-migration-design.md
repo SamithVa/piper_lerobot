@@ -136,9 +136,9 @@ legacy mock — verify during implementation). Historical
 
 ## Dependency change
 
-- Remove `piper_sdk`; add `pyAgxArm` (editable install of the in-repo `./pyAgxArm`
+- Remove `piper_sdk`; add `pyAgxArm` (editable install of the vendored `third_party/pyAgxArm`
   checkout) + `python-can>=3.3.4`.
-- Install into the `lerobot` env: `pip install -e ./pyAgxArm`.
+- Install into the `lerobot` env: `pip install -e third_party/pyAgxArm`.
 - The deploy client historically ran in "base python"; since the user is
   standardizing on the `lerobot` env, the client runs there too — one env to
   install into. (If base python is still used for the client, install there as

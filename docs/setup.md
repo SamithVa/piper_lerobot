@@ -14,11 +14,11 @@ cd piper_lerobot
 pip install -e .
 ````
 
-### 安装 piper 依赖
+### 安装 piper 依赖 (pyAgxArm SDK)
 
 ````
 pip install python-can
-pip install piper_sdk
+pip install -e third_party/pyAgxArm
 ````
 
 ## 2. 连接机械臂（CAN）

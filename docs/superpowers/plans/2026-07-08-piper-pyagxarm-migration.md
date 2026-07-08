@@ -6,7 +6,7 @@
 
 **Architecture:** `PiperMotorsBus` (the one abstraction the robot/teleop wrap) is rewritten to drive `pyAgxArm`'s `robot` + gripper `effector` behind an unchanged 7-DOF `read()`/`write()` interface. A raw-units conversion at the `read()` boundary keeps recorded datasets and `piper_leader`/`piper_follower` byte-for-byte compatible. The five hardware util scripts and one mock-based unit test are ported alongside.
 
-**Tech Stack:** Python 3.12 (`lerobot` conda env), `pyAgxArm` (editable, in-repo `./pyAgxArm`), `python-can>=3.3.4`, pytest.
+**Tech Stack:** Python 3.12 (`lerobot` conda env), `pyAgxArm` (editable, vendored at `third_party/pyAgxArm`), `python-can>=3.3.4`, pytest.
 
 ## Global Constraints
 
@@ -36,7 +36,7 @@ Run:
 REPO=/data/wanshan/VLAs/piper_lerobot
 LEROBOT_PY=/home/embodied/miniconda3/envs/lerobot/bin/python
 cd "$REPO"
-$LEROBOT_PY -m pip install -e ./pyAgxArm
+$LEROBOT_PY -m pip install -e third_party/pyAgxArm
 ```
 Expected: ends with `Successfully installed pyAgxArm-<version>`. `python-can` is already present (4.6.1) and satisfies `>=3.3.4`.
 
@@ -65,7 +65,7 @@ with:
 
 ````
 pip install python-can
-pip install -e ./pyAgxArm
+pip install -e third_party/pyAgxArm
 ````
 ```
 
