@@ -18,6 +18,7 @@ Example (bimanual):
 import concurrent.futures
 import json
 import logging
+import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -94,6 +95,26 @@ def http_post(url: str, body: bytes = b"", timeout: float = 15.0) -> bytes:
         return resp.read()
 
 
+def http_post_async(url: str, body: bytes, timeout: float) -> concurrent.futures.Future:
+    """http_post on a daemon thread, result delivered via a Future.
+
+    Deliberately NOT a ThreadPoolExecutor: its workers are non-daemon and an
+    atexit hook joins them all, so Ctrl-C while a /predict is in flight would
+    stall process exit for up to the request timeout. A daemon thread is
+    simply abandoned, keeping Ctrl-C exit instant.
+    """
+    future: concurrent.futures.Future = concurrent.futures.Future()
+
+    def work():
+        try:
+            future.set_result(http_post(url, body, timeout))
+        except Exception as exc:  # noqa: BLE001 — delivered via the Future
+            future.set_exception(exc)
+
+    threading.Thread(target=work, daemon=True).start()
+    return future
+
+
 # ---------- main loop ----------
 
 
@@ -140,7 +161,6 @@ def main(cfg: DeployClientConfig):
 
     robot.connect()
     executor = ChunkExecutor(cfg.chunk_threshold)
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     inflight: concurrent.futures.Future | None = None  # at most one /predict in flight
 
     try:
@@ -188,9 +208,7 @@ def main(cfg: DeployClientConfig):
             if executor.should_request():
                 payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
                 executor.mark_requested()
-                inflight = pool.submit(
-                    http_post, cfg.server + "/predict", payload, cfg.predict_timeout_s
-                )
+                inflight = http_post_async(cfg.server + "/predict", payload, cfg.predict_timeout_s)
 
             next_t += period
             delay = next_t - time.perf_counter()
@@ -199,7 +217,6 @@ def main(cfg: DeployClientConfig):
     except KeyboardInterrupt:
         logging.info("interrupted — stopping")
     finally:
-        pool.shutdown(wait=False, cancel_futures=True)
         robot.disconnect()
         logging.info("robot disconnected")
 
