@@ -18,12 +18,15 @@ from lerobot.configs.types import FeatureType
 from lerobot.policies.factory import get_policy_class, make_pre_post_processors
 
 from .base import PolicyAdapter
+from .rtc_helpers import build_rtc_kwargs
 
 IMG_PREFIX = "observation.images."
 
 
 class LerobotAdapter(PolicyAdapter):
-    def __init__(self, checkpoint: str = "", device: str = "", fps="30"):
+    def __init__(self, checkpoint: str = "", device: str = "", fps="30",
+                 rtc="0", rtc_execution_horizon="10", rtc_guidance="10.0",
+                 rtc_schedule="exp", compile=""):
         if not checkpoint:
             raise ValueError("--checkpoint=<hub id or local path> is required")
         if not device:
@@ -31,10 +34,27 @@ class LerobotAdapter(PolicyAdapter):
         self.checkpoint = checkpoint
         self.device = device
         self.fps = float(fps)
+        self.rtc_enabled = bool(int(rtc))
+        self.execution_horizon = int(rtc_execution_horizon)
+        self._last_raw: torch.Tensor | None = None  # (chunk_size, action_dim), normalized space
 
         cfg = PreTrainedConfig.from_pretrained(checkpoint)
+        if compile != "":
+            cfg.compile_model = bool(int(compile))
+        if self.rtc_enabled:
+            # RTC guidance runs inside the policy's denoise loop; the config must
+            # carry it BEFORE from_pretrained so init_rtc_processor sees it.
+            from lerobot.configs.types import RTCAttentionSchedule
+            from lerobot.policies.rtc.configuration_rtc import RTCConfig
+
+            cfg.rtc_config = RTCConfig(
+                enabled=True,
+                execution_horizon=self.execution_horizon,
+                max_guidance_weight=float(rtc_guidance),
+                prefix_attention_schedule=RTCAttentionSchedule[rtc_schedule.upper()],
+            )
         policy_cls = get_policy_class(cfg.type)
-        policy = policy_cls.from_pretrained(checkpoint)
+        policy = policy_cls.from_pretrained(checkpoint, config=cfg)
         policy.to(device)
         policy.eval()
         self.policy = policy
@@ -84,6 +104,8 @@ class LerobotAdapter(PolicyAdapter):
             "chunk_size": self._chunk_size,
             "fps": self.fps,
             "checkpoint": self.checkpoint,
+            "rtc": self.rtc_enabled,
+            "rtc_execution_horizon": self.execution_horizon,
         }
 
     def _image_tensor(self, img) -> torch.Tensor:
@@ -106,9 +128,20 @@ class LerobotAdapter(PolicyAdapter):
         obs["observation.state"] = state_t.unsqueeze(0).to(self.device)
         obs["task"] = task
         batch = self.preprocess(obs)
-        chunk = self.policy.predict_action_chunk(batch)
+
+        kwargs = {}
+        if self.rtc_enabled:
+            kwargs = build_rtc_kwargs(
+                self._last_raw, consumed, delay_ticks, self.execution_horizon
+            )
+        chunk = self.policy.predict_action_chunk(batch, **kwargs)
+        if self.rtc_enabled:
+            # Keep the normalized (pre-postprocess) chunk: RTC guidance compares
+            # in this space; the postprocessed chunk goes to the robot.
+            self._last_raw = chunk.squeeze(0).detach().clone()
         chunk = self.postprocess(chunk)
         return chunk.squeeze(0).detach().float().cpu().numpy()
 
     def reset(self) -> None:
+        self._last_raw = None
         self.policy.reset()
