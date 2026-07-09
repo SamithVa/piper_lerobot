@@ -1,7 +1,7 @@
 # Deploy launcher + presets design
 
 **Date:** 2026-07-09
-**Status:** approved
+**Status:** implemented
 **Builds on:** `2026-07-04-piper-deploy-client-server-design.md` (the working
 client/server in `deploy/`)
 
