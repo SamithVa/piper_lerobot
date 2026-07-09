@@ -45,3 +45,16 @@ def test_resolve_camera_map_validates_robot_cameras_exist():
 def test_resolve_camera_map_passthrough_when_valid():
     cmap = {"top": "camera1", "l_wrist": "camera2"}
     assert resolve_camera_map(cmap, ["camera1", "camera2"], ["top", "l_wrist"]) == cmap
+
+
+def test_check_dims_passes_on_match():
+    from deploy.client import check_dims
+
+    check_dims({"state_dim": 2, "action_dim": 2}, ["a.pos", "b.pos"])  # no raise
+
+
+def test_check_dims_rejects_mismatch():
+    from deploy.client import check_dims
+
+    with pytest.raises(SystemExit, match="action_dim"):
+        check_dims({"state_dim": 2, "action_dim": 3}, ["a.pos", "b.pos"])

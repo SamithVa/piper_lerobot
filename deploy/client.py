@@ -15,9 +15,9 @@ Example (bimanual):
         --camera_map='{"top": "camera1", "l_wrist": "camera2", "r_wrist": "camera3"}' \
         --duration_s=60
 """
+import concurrent.futures
 import json
 import logging
-import threading
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -69,6 +69,15 @@ def resolve_camera_map(
             f"Pass --camera_map mapping robot cameras {robot_cams} onto them."
         )
     return camera_map
+
+
+def check_dims(info: dict, motor_keys: list[str]) -> None:
+    """Fail fast — before touching the arms — if policy and robot disagree."""
+    for key in ("state_dim", "action_dim"):
+        if info[key] != len(motor_keys):
+            raise SystemExit(
+                f"{key} mismatch: policy expects {info[key]}, robot has {len(motor_keys)} motors"
+            )
 
 
 # ---------- HTTP ----------
@@ -127,28 +136,12 @@ def main(cfg: DeployClientConfig):
     camera_map = resolve_camera_map(
         cfg.camera_map, info["image_keys"], list(robot.cameras)
     )
-    if info["state_dim"] != len(motor_keys):
-        raise SystemExit(
-            f"state_dim mismatch: policy expects {info['state_dim']}, robot has {len(motor_keys)} motors"
-        )
-    if info["action_dim"] != len(motor_keys):
-        raise SystemExit(
-            f"action_dim mismatch: policy outputs {info['action_dim']}, robot has {len(motor_keys)} motors"
-        )
+    check_dims(info, motor_keys)
 
     robot.connect()
     executor = ChunkExecutor(cfg.chunk_threshold)
-    pending: dict = {}  # worker thread -> loop: {"chunk": ...} or {"error": ...}
-
-    def post_predict_async(payload: bytes):
-        def work():
-            try:
-                raw = http_post(cfg.server + "/predict", payload, cfg.predict_timeout_s)
-                pending["chunk"] = protocol.decode_chunk(raw)
-            except Exception as exc:  # noqa: BLE001 — must never kill the worker silently
-                pending["error"] = exc
-
-        threading.Thread(target=work, daemon=True).start()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    inflight: concurrent.futures.Future | None = None  # at most one /predict in flight
 
     try:
         http_post(cfg.server + "/reset")
@@ -169,15 +162,17 @@ def main(cfg: DeployClientConfig):
         t_end = time.perf_counter() + cfg.duration_s
         next_t = time.perf_counter()
         while time.perf_counter() < t_end:
-            if "chunk" in pending:
-                usable = executor.on_chunk(pending.pop("chunk"))
-                if usable == 0:
-                    logging.warning(
-                        "chunk arrived fully stale (inference slower than execution) — re-requesting"
-                    )
-            if "error" in pending:
-                logging.warning(f"/predict failed: {pending.pop('error')}")
-                executor.on_request_failed()
+            if inflight is not None and inflight.done():
+                try:
+                    usable = executor.on_chunk(protocol.decode_chunk(inflight.result()))
+                    if usable == 0:
+                        logging.warning(
+                            "chunk arrived fully stale (inference slower than execution) — re-requesting"
+                        )
+                except Exception as exc:  # noqa: BLE001 — a failed predict must not kill the loop
+                    logging.warning(f"/predict failed: {exc}")
+                    executor.on_request_failed()
+                inflight = None
 
             row = executor.next_action()
             if row is not None:
@@ -193,7 +188,9 @@ def main(cfg: DeployClientConfig):
             if executor.should_request():
                 payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
                 executor.mark_requested()
-                post_predict_async(payload)
+                inflight = pool.submit(
+                    http_post, cfg.server + "/predict", payload, cfg.predict_timeout_s
+                )
 
             next_t += period
             delay = next_t - time.perf_counter()
@@ -202,6 +199,7 @@ def main(cfg: DeployClientConfig):
     except KeyboardInterrupt:
         logging.info("interrupted — stopping")
     finally:
+        pool.shutdown(wait=False, cancel_futures=True)
         robot.disconnect()
         logging.info("robot disconnected")
 
