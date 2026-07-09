@@ -97,6 +97,11 @@ class DeployClientConfig:
     fps: float = 0.0  # 0 -> use the server's fps
     chunk_threshold: float = 0.5
     predict_timeout_s: float = 15.0
+    # The server's FIRST predict is slow (~15-20s: torch.compile + CUDA-graph
+    # capture for pi05); every predict after is <0.5s. Give the initial blocking
+    # request its own generous budget so the cold start doesn't trip the tight
+    # steady-state predict_timeout_s (which stays short to catch real hangs).
+    first_predict_timeout_s: float = 90.0
     # {"robot_cam_name": "policy_image_key"}, e.g. {"top": "camera1"}
     camera_map: dict[str, str] = field(default_factory=dict)
 
@@ -148,12 +153,14 @@ def main(cfg: DeployClientConfig):
     try:
         http_post(cfg.server + "/reset")
 
-        # Blocking first chunk so the loop starts with actions in hand.
-        logging.info("requesting first chunk...")
+        # Blocking first chunk so the loop starts with actions in hand. Uses the
+        # generous first_predict_timeout_s because the server pays a one-time
+        # cold-start (compile + CUDA-graph capture) on its very first predict.
+        logging.info("requesting first chunk (server cold start may take ~15-20s)...")
         payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
         executor.mark_requested()
         executor.on_chunk(
-            protocol.decode_chunk(http_post(cfg.server + "/predict", payload, cfg.predict_timeout_s))
+            protocol.decode_chunk(http_post(cfg.server + "/predict", payload, cfg.first_predict_timeout_s))
         )
         logging.info(f"running at {fps:.0f} fps for {cfg.duration_s:.0f}s — Ctrl-C to stop")
 

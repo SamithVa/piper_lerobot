@@ -34,8 +34,46 @@ trained the checkpoint** (a newer lerobot writes config fields an older one
 refuses to parse). Checkpoints from `train_smolvla_bimanual.sh` / bare
 `lerobot-train` were trained by the lerobot env's installed lerobot, so
 `PYTHONPATH=.` (repo root only). Add `src` in front (`PYTHONPATH=src:.`) only
-for checkpoints trained with this checkout's lerobot (e.g. pi05 via
-`python src/lerobot/scripts/lerobot_train.py`).
+for checkpoints trained with this checkout's lerobot.
+
+## pi05 (`outputs/pi05`, from `samithva/pi05_stack_cup_bowl`)
+
+```bash
+# terminal 1 — server (dedicated env + training-matching lerobot)
+bash deploy/serve_pi05.sh                 # or: serve_pi05.sh <checkpoint> <port>
+# terminal 2 — client (base python), IDENTITY camera_map
+bash deploy/run_client_pi05.sh "Stack the cup on top of the bowl." 60
+```
+
+The server's **first** `/predict` takes ~15-20s (one-time `torch.compile` + CUDA-graph
+capture); every predict after is <0.5s. The client's first blocking request uses
+`first_predict_timeout_s` (90s) to absorb this, while in-loop predicts keep the tight
+`predict_timeout_s` (15s). Don't try to hide the cold start with a server-side warmup
+predict — a throwaway forward pass poisons pi05's CUDA-graph state and every real
+predict then fails with `Offset increment outside graph capture`.
+
+This checkpoint needs a different env than smolvla — matching **both** lerobot
+*and* transformers to what trained it (**lerobot v0.5.1 + transformers 5.3.0**).
+`serve_pi05.sh` encodes the whole recipe; its header explains why. v0.5.1 predates
+the `delta_actions_processor` → `relative_actions_processor` rename and pins
+`transformers==5.3.0`, so we serve from:
+
+- lerobot source at tag `v0.5.1` — git worktree at `/data/wanshan/VLAs/lerobot-pi05-serve`
+  (`GIT_LFS_SKIP_SMUDGE=1 git -C /data/wanshan/VLAs/lab_challenge/lerobot worktree add --detach <path> v0.5.1`);
+- conda env `lerobot_pi05` — a clone of `lerobot` with `transformers` pinned to 5.3.0
+  (`conda create --clone lerobot -n lerobot_pi05`; `pip install "transformers==5.3.0"`).
+
+**Both versions must match training exactly.** transformers 5.5.x loads and runs
+but *silently breaks* vision+state→action conditioning — the policy ignores its
+inputs and emits a near-constant chunk. Verified with a sensitivity probe: on the
+training dataset, v0.5.1+tf5.3.0 reproduces recorded actions to nMAE ≈ 0.03 (vs
+0.96 — worse than a mean baseline — under tf 5.5.x).
+
+The pi05 image keys are the raw camera names (`l_wrist`/`top`/`r_wrist`), so the
+client uses an **identity** `--camera_map`, not the smolvla `camera1/2/3` rename.
+The gated paligemma tokenizer loads from the HF cache offline (the box's SOCKS
+proxy isn't usable by python); its one missing cache file, `config.json`, has
+been added under `$HF_HOME`.
 
 ## Adding a NON-lerobot policy (openpi, GR00T, ...)
 
