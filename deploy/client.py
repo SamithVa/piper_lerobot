@@ -18,6 +18,7 @@ Example (bimanual):
 import concurrent.futures
 import json
 import logging
+import math
 import threading
 import time
 import urllib.request
@@ -81,6 +82,23 @@ def check_dims(info: dict, motor_keys: list[str]) -> None:
             )
 
 
+class DelayEstimator:
+    """Predicts next-request inference delay in control ticks. Starts pessimistic
+    (0.5 s — the steady-state predict budget), then EMA-tracks measured in-flight
+    tick counts. Overestimating freezes a slightly longer prefix (smoother);
+    underestimating un-freezes rows the robot already executed (jerk) — so ceil."""
+
+    def __init__(self, fps: float, alpha: float = 0.5):
+        self._estimate = 0.5 * fps
+        self._alpha = alpha
+
+    def predict(self) -> int:
+        return max(1, math.ceil(self._estimate))
+
+    def update(self, measured_ticks: int) -> None:
+        self._estimate = (1 - self._alpha) * self._estimate + self._alpha * measured_ticks
+
+
 # ---------- HTTP ----------
 
 
@@ -136,10 +154,11 @@ class DeployClientConfig:
     camera_map: dict[str, str] = field(default_factory=dict)
 
 
-def capture_payload(robot, camera_map, motor_keys, task) -> bytes:
+def capture_payload(robot, camera_map, motor_keys, task, consumed=-1, delay_ticks=0) -> bytes:
     obs = robot.get_observation()
     return protocol.encode_observation(
-        build_images(obs, camera_map), build_state(obs, motor_keys), task
+        build_images(obs, camera_map), build_state(obs, motor_keys), task,
+        consumed=consumed, delay_ticks=delay_ticks,
     )
 
 
@@ -151,6 +170,9 @@ def main(cfg: DeployClientConfig):
     logging.info(f"policy: {info}")
     fps = cfg.fps or float(info["fps"])
     period = 1.0 / fps
+    delay_est = DelayEstimator(fps)
+    rtc = bool(info.get("rtc", False))
+    logging.info(f"RTC serving: {'ON' if rtc else 'off'}")
 
     robot = make_robot_from_config(cfg.robot)
     motor_keys = list(robot.action_features)
@@ -175,6 +197,17 @@ def main(cfg: DeployClientConfig):
         executor.on_chunk(
             protocol.decode_chunk(http_post(cfg.server + "/predict", payload, cfg.first_predict_timeout_s))
         )
+        if rtc:
+            # Second blocking predict warms the RTC-guidance compile path (a
+            # separate graph from the no-leftover path) before the arm moves.
+            # consumed=0: nothing executed yet, full chunk is the leftover.
+            logging.info("warming RTC guidance path (second cold start possible)...")
+            payload = capture_payload(robot, camera_map, motor_keys, cfg.task,
+                                      consumed=0, delay_ticks=delay_est.predict())
+            executor.mark_requested()
+            executor.on_chunk(
+                protocol.decode_chunk(http_post(cfg.server + "/predict", payload, cfg.first_predict_timeout_s))
+            )
         logging.info(f"running at {fps:.0f} fps for {cfg.duration_s:.0f}s — Ctrl-C to stop")
 
         last_action: dict | None = None
@@ -189,6 +222,7 @@ def main(cfg: DeployClientConfig):
                         logging.warning(
                             "chunk arrived fully stale (inference slower than execution) — re-requesting"
                         )
+                    delay_est.update(executor.last_skip)
                 except Exception as exc:  # noqa: BLE001 — a failed predict must not kill the loop
                     logging.warning(f"/predict failed: {exc}")
                     executor.on_request_failed()
@@ -206,7 +240,10 @@ def main(cfg: DeployClientConfig):
                     logging.warning("action queue dry — holding position")
 
             if executor.should_request():
-                payload = capture_payload(robot, camera_map, motor_keys, cfg.task)
+                payload = capture_payload(
+                    robot, camera_map, motor_keys, cfg.task,
+                    consumed=executor.consumed_rows, delay_ticks=delay_est.predict(),
+                )
                 executor.mark_requested()
                 inflight = http_post_async(cfg.server + "/predict", payload, cfg.predict_timeout_s)
 

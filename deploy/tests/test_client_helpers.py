@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from deploy.client import action_to_dict, build_images, build_state, resolve_camera_map
+from deploy.client import DelayEstimator, action_to_dict, build_images, build_state, resolve_camera_map
 
 
 def test_build_state_orders_by_motor_keys():
@@ -58,3 +58,15 @@ def test_check_dims_rejects_mismatch():
 
     with pytest.raises(SystemExit, match="action_dim"):
         check_dims({"state_dim": 2, "action_dim": 3}, ["a.pos", "b.pos"])
+
+
+def test_delay_estimator_starts_pessimistic_and_tracks_measurements():
+    est = DelayEstimator(fps=30.0)
+    assert est.predict() == 15          # 0.5 s worth of ticks before any data
+    est.update(5)
+    assert est.predict() == 10          # EMA moves toward measurement, ceil'd
+    for _ in range(60):
+        est.update(5)
+    assert est.predict() == 5           # converges
+    est.update(0)                        # a zero measurement never predicts 0
+    assert est.predict() >= 1
