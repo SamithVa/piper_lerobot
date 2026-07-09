@@ -27,6 +27,8 @@ class ChunkExecutor:
         self._tick = 0
         self._request_tick: int | None = None
         self._executed_since_request = 0
+        self._skip = 0       # rows dropped at the last install (full-chunk coords)
+        self._last_skip = 0  # exposed to the client as the measured in-flight delay
 
     @property
     def in_flight(self) -> bool:
@@ -69,6 +71,8 @@ class ChunkExecutor:
         a fully-stale chunk (0 usable rows) and log/re-request.
         """
         skip = self._executed_since_request if self.in_flight else 0
+        self._skip = skip
+        self._last_skip = skip
         self._request_tick = None
         rows = list(np.asarray(chunk))
         usable = rows[skip:]
@@ -78,3 +82,14 @@ class ChunkExecutor:
 
     def on_request_failed(self) -> None:
         self._request_tick = None
+
+    @property
+    def consumed_rows(self) -> int:
+        """Rows of the most recent chunk that are in the past, in FULL-chunk
+        coordinates (install-skip included). Server-side leftover start index."""
+        return self._skip + (self._chunk_len - len(self._queue))
+
+    @property
+    def last_skip(self) -> int:
+        """Rows skipped at the last install == measured in-flight delay (ticks)."""
+        return self._last_skip

@@ -105,3 +105,38 @@ def test_request_failed_clears_in_flight():
     assert ex.should_request() is False
     ex.on_request_failed()
     assert ex.should_request() is True
+
+
+def test_consumed_rows_tracks_full_chunk_coordinates():
+    ex = ChunkExecutor()
+    ex.mark_requested()
+    ex.on_chunk(chunk(10))
+    assert ex.consumed_rows == 0
+    ex.next_action()
+    ex.next_action()
+    assert ex.consumed_rows == 2
+
+    # Request mid-chunk, execute 3 rows in flight, then install a new chunk:
+    ex.mark_requested()
+    ex.next_action(), ex.next_action(), ex.next_action()
+    ex.on_chunk(chunk(10, start=100.0))
+    assert ex.last_skip == 3
+    # New chunk: 3 rows skipped at install, 0 executed since.
+    assert ex.consumed_rows == 3
+    ex.next_action()
+    assert ex.consumed_rows == 4
+
+
+def test_consumed_rows_before_any_chunk_is_zero():
+    ex = ChunkExecutor()
+    assert ex.consumed_rows == 0
+    assert ex.last_skip == 0
+
+
+def test_dry_queue_counts_all_rows_consumed():
+    ex = ChunkExecutor()
+    ex.mark_requested()
+    ex.on_chunk(chunk(2))
+    ex.next_action(), ex.next_action()
+    assert ex.next_action() is None  # dry
+    assert ex.consumed_rows == 2
