@@ -91,8 +91,12 @@ Flow:
      preset's env + PYTHONPATH, stdout/stderr → `deploy/logs/server-<preset>.log`,
      then poll `/info` until ready (timeout 120s for model load; on timeout,
      print the log path and tail).
-3. Run the client **in the foreground** (same process via `deploy.client`
-   entry, constructed from the preset's robot/camera config + CLI args).
+3. Run the client **in the foreground** as a subprocess: the preset's client
+   python + PYTHONPATH, `-m deploy.client` with flags built from the preset's
+   robot/camera config + CLI args (the launcher itself stays stdlib-only and
+   never imports lerobot). The spawned server uses `start_new_session=True`
+   so the terminal's Ctrl-C (SIGINT to the foreground process group) reaches
+   the client but not the warm server.
    If the preset has no `client` section (e.g. `example.json`), stop after
    the server is confirmed healthy and print next steps instead.
 4. Ctrl-C stops the client only; the spawned server keeps running (detached)
