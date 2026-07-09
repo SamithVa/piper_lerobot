@@ -142,3 +142,14 @@ def test_wait_ready_reports_dead_server(tmp_path):
     path = write_preset(tmp_path, "dead", preset)
     with pytest.raises(SystemExit, match="server-dead.log"):
         launch.main([str(path)])
+
+
+def test_wait_ready_timeout_names_pid():
+    class FakeProc:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    with pytest.raises(SystemExit, match="12345"):
+        launch.wait_ready(free_port(), FakeProc(), "fake", timeout_s=1.0)

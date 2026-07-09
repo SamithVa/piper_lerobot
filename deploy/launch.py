@@ -132,7 +132,11 @@ def wait_ready(port: int, proc: subprocess.Popen, name: str, timeout_s: float = 
         if info:
             return info
         time.sleep(0.5)
-    raise SystemExit(f"server not ready after {timeout_s:.0f}s — see {_log_path(name)}")
+    raise SystemExit(
+        f"server not ready after {timeout_s:.0f}s — left running as pid {proc.pid} "
+        f"(may just be a slow model load). Watch {_log_path(name)}; rerun this command "
+        f"to reuse it once ready, or `kill {proc.pid}` to abort it."
+    )
 
 
 def build_client_cmd(preset: dict, task: str, extra_flags: list[str]) -> tuple[list[str], dict]:
