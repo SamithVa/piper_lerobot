@@ -78,6 +78,16 @@ def test_unknown_path_404(running_server):
     assert excinfo.value.code == 404
 
 
+def test_predict_forwards_meta_to_adapter(running_server):
+    base, adapter = running_server
+    payload = protocol.encode_observation(
+        {k: np.zeros((8, 8, 3), np.uint8) for k in adapter.image_keys},
+        np.zeros(adapter.state_dim, np.float32), "t", consumed=7, delay_ticks=4,
+    )
+    _post(base + "/predict", payload)
+    assert adapter.last_meta == {"consumed": 7, "delay_ticks": 4}
+
+
 def test_parse_args_forwards_extra_flags():
     args, kwargs = parse_args(
         ["--adapter=lerobot", "--port=9000", "--checkpoint=/some/path", "--device=cuda"]

@@ -55,9 +55,12 @@ def make_handler(adapter):
                 length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(length)
                 if self.path == "/predict":
-                    images, state, task, _meta = protocol.decode_observation(body)
+                    images, state, task, meta = protocol.decode_observation(body)
                     with lock:
-                        chunk = adapter.predict_chunk(images, state, task)
+                        chunk = adapter.predict_chunk(
+                            images, state, task,
+                            consumed=meta["consumed"], delay_ticks=meta["delay_ticks"],
+                        )
                     self._send(200, protocol.encode_chunk(chunk))
                 elif self.path == "/reset":
                     with lock:

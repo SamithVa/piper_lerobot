@@ -19,10 +19,15 @@ class PolicyAdapter(ABC):
 
     @abstractmethod
     def predict_chunk(
-        self, images: dict[str, np.ndarray], state: np.ndarray, task: str
+        self, images: dict[str, np.ndarray], state: np.ndarray, task: str,
+        consumed: int = -1, delay_ticks: int = 0,
     ) -> np.ndarray:
         """images: HWC uint8 RGB keyed by the policy's image keys;
-        state: (state_dim,). Returns (chunk_size, action_dim) float32."""
+        state: (state_dim,). consumed: rows of the previously returned chunk
+        already executed client-side (-1 = no chunk yet); delay_ticks: client's
+        predicted inference delay in control ticks. RTC-capable adapters use
+        these to blend consecutive chunks; others may ignore them.
+        Returns (chunk_size, action_dim) float32."""
 
     def reset(self) -> None:
         """Clear per-episode state (action queues etc.). Optional."""

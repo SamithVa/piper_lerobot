@@ -97,7 +97,7 @@ class LerobotAdapter(PolicyAdapter):
         return t.unsqueeze(0).to(self.device)
 
     @torch.no_grad()
-    def predict_chunk(self, images, state, task) -> np.ndarray:
+    def predict_chunk(self, images, state, task, consumed=-1, delay_ticks=0) -> np.ndarray:
         missing = [key for key in self._image_keys if key not in images]
         if missing:
             raise ValueError(f"missing images for keys {missing}; got {sorted(images)}")
