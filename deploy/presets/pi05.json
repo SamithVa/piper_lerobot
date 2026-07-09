@@ -17,7 +17,7 @@
       "TRANSFORMERS_OFFLINE": "1"
     },
     "adapter": "lerobot",
-    "args": {"checkpoint": "outputs/pi05", "device": "cuda", "fps": "30"},
+    "args": {"checkpoint": "outputs/pi05", "device": "cuda", "fps": "30", "rtc": "1", "rtc_schedule": "exp"},
     "port": 8080
   },
   "client": {

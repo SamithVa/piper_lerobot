@@ -50,6 +50,15 @@ def test_decide_refuse_on_mismatch_or_foreign_server():
     assert launch.decide({}, None) == "refuse"  # no checkpoint key: not ours
 
 
+def test_decide_refuses_checkpoint_match_with_wrong_rtc_mode():
+    info = {"checkpoint": "outputs/pi05", "rtc": False}
+    assert launch.decide(info, "outputs/pi05", want_rtc=True) == "refuse"
+    assert launch.decide(info, "outputs/pi05", want_rtc=False) == "reuse"
+    # Older server without an rtc field: only reusable when RTC isn't wanted.
+    assert launch.decide({"checkpoint": "outputs/pi05"}, "outputs/pi05", want_rtc=True) == "refuse"
+    assert launch.decide({"checkpoint": "outputs/pi05"}, "outputs/pi05", want_rtc=False) == "reuse"
+
+
 def test_resolve_path_repo_relative_and_hub_id():
     assert launch.resolve_path(".") == str(launch.REPO_ROOT)
     assert launch.resolve_path("samithva/pi05_stack_cup_bowl") == "samithva/pi05_stack_cup_bowl"

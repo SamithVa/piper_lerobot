@@ -47,7 +47,7 @@ def resolve_path(value: str) -> str:
     return str(candidate.resolve()) if candidate.exists() else value
 
 
-def decide(info: dict | None, want_checkpoint: str | None) -> str:
+def decide(info: dict | None, want_checkpoint: str | None, want_rtc: bool = False) -> str:
     """Reuse a warm matching server, refuse a busy port, spawn if free.
 
     info is /info of whatever answers on the port (None = nothing listening).
@@ -55,7 +55,8 @@ def decide(info: dict | None, want_checkpoint: str | None) -> str:
     """
     if info is None:
         return "spawn"
-    if "checkpoint" in info and info["checkpoint"] == want_checkpoint:
+    if "checkpoint" in info and info["checkpoint"] == want_checkpoint \
+            and bool(info.get("rtc", False)) == want_rtc:
         return "reuse"
     return "refuse"
 
@@ -187,7 +188,8 @@ def main(argv: list[str] | None = None) -> subprocess.Popen | None:
 
     proc = None
     info = server_info(port)
-    action = decide(info, want)
+    want_rtc = bool(int(preset["server"].get("args", {}).get("rtc", "0")))
+    action = decide(info, want, want_rtc=want_rtc)
     if action == "reuse":
         print(f"[deploy.launch] reusing warm server on port {port}: {info['name']}")
         if args.fps is not None:
