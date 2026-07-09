@@ -190,10 +190,15 @@ def main(argv: list[str] | None = None) -> subprocess.Popen | None:
     action = decide(info, want)
     if action == "reuse":
         print(f"[deploy.launch] reusing warm server on port {port}: {info['name']}")
+        if args.fps is not None:
+            print("[deploy.launch] note: --fps only applies when spawning; the reused server keeps its fps")
     elif action == "refuse":
+        if "checkpoint" in info:
+            reason = f"serving checkpoint={info['checkpoint']!r}, preset wants {want!r}"
+        else:
+            reason = "no 'checkpoint' in /info — an older deploy.server or a foreign process"
         raise SystemExit(
-            f"port {port} is busy with a different policy "
-            f"(serving checkpoint={info.get('checkpoint')!r}, preset wants {want!r}).\n"
+            f"port {port} is busy with a different policy ({reason}).\n"
             f"Not killing it — someone may be using it. Rerun with --port=<free port>."
         )
     else:

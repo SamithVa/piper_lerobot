@@ -53,8 +53,8 @@ curl -s http://127.0.0.1:8090/info
 Then:
 
 1. **Adapter** — copy `deploy/adapters/dummy.py` → `deploy/adapters/<name>.py`
-   and implement `info()`, `predict_chunk(images, state, task)`, `reset()`
-   (the contract is spelled out in `dummy.py`'s docstring and
+   and implement `info()`, `predict_chunk(images, state, task, consumed=-1, delay_ticks=0)`,
+   `reset()` (the contract is spelled out in `dummy.py`'s docstring and
    `adapters/base.py`). Register it in `deploy/adapters/__init__.py::make_adapter`.
 2. **Preset** — copy `deploy/presets/example.json` → `presets/<name>.json`;
    point `server.python` at whatever env your model needs and add a `client`

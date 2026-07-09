@@ -99,7 +99,7 @@ def test_build_client_cmd_maps_preset_to_flags():
             "first_predict_timeout_s": 90,
         },
     }
-    cmd, env = launch.build_client_cmd(preset, "stack", ["--fps=15"])
+    cmd, env = launch.build_client_cmd(preset, "stack", ["--chunk_threshold=0.7"])
     assert cmd[0] == "/some/python"
     assert cmd[1:3] == ["-m", "deploy.client"]
     assert "--robot.type=bi_piper_follower" in cmd
@@ -109,7 +109,7 @@ def test_build_client_cmd_maps_preset_to_flags():
     assert "--task=stack" in cmd
     assert '--camera_map={"top": "camera1"}' in cmd
     assert "--first_predict_timeout_s=90" in cmd  # non-structural keys forwarded
-    assert cmd[-1] == "--fps=15"  # CLI extras win (draccus takes the last value)
+    assert cmd[-1] == "--chunk_threshold=0.7"  # CLI extras win (draccus takes the last value)
     assert str(launch.REPO_ROOT / "src") in env["PYTHONPATH"]
 
 
