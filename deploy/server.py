@@ -18,8 +18,8 @@ Any adapter exception -> HTTP 500 with the traceback as text; the server stays u
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
-import threading
 import traceback
 from argparse import ArgumentParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,7 +29,11 @@ from deploy.adapters import make_adapter
 
 
 def make_handler(adapter):
-    lock = threading.Lock()  # serialize GPU inference across connections
+    # torch.compile(mode="max-autotune") cudagraph-tree state is thread-local;
+    # a graph captured on one thread crashes if replayed/recaptured from
+    # another. Route every adapter call through one persistent worker thread
+    # so all captures+replays stay pinned to it (also serializes GPU work).
+    worker = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference")
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -56,15 +60,13 @@ def make_handler(adapter):
                 body = self.rfile.read(length)
                 if self.path == "/predict":
                     images, state, task, meta = protocol.decode_observation(body)
-                    with lock:
-                        chunk = adapter.predict_chunk(
-                            images, state, task,
-                            consumed=meta["consumed"], delay_ticks=meta["delay_ticks"],
-                        )
+                    chunk = worker.submit(
+                        adapter.predict_chunk, images, state, task,
+                        consumed=meta["consumed"], delay_ticks=meta["delay_ticks"],
+                    ).result()
                     self._send(200, protocol.encode_chunk(chunk))
                 elif self.path == "/reset":
-                    with lock:
-                        adapter.reset()
+                    worker.submit(adapter.reset).result()
                     self._send(200, b"", "text/plain")
                 else:
                     self._send(404, b"not found", "text/plain")
