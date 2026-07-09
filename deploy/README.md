@@ -1,3 +1,5 @@
+**English** | [中文](README.zh.md)
+
 # deploy — run any policy on the Piper arms
 
 The **server** hosts a policy inside whatever env it needs; the **client**
@@ -11,7 +13,7 @@ untouched.
 See the pipeline work first with zero setup (no GPU, checkpoint, or arms):
 
 ```bash
-python3 -m deploy.launch example        # dummy policy server
+python -m deploy.launch example        # dummy policy server
 curl -s http://127.0.0.1:8090/info
 ```
 
