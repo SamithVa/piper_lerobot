@@ -83,6 +83,7 @@ class LerobotAdapter(PolicyAdapter):
             "action_dim": self._action_dim,
             "chunk_size": self._chunk_size,
             "fps": self.fps,
+            "checkpoint": self.checkpoint,
         }
 
     def _image_tensor(self, img) -> torch.Tensor:

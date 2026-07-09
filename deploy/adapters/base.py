@@ -14,7 +14,8 @@ class PolicyAdapter(ABC):
     def info(self) -> dict:
         """Static metadata:
         {"name": str, "image_keys": list[str], "state_dim": int,
-         "action_dim": int, "chunk_size": int, "fps": float}"""
+         "action_dim": int, "chunk_size": int, "fps": float,
+         "checkpoint": str | None}   # exact value the adapter was given, or None"""
 
     @abstractmethod
     def predict_chunk(

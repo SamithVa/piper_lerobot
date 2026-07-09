@@ -37,6 +37,7 @@ class DummyAdapter(PolicyAdapter):
             "action_dim": self.action_dim,
             "chunk_size": self.chunk_size,
             "fps": self.fps,
+            "checkpoint": None,
         }
 
     def predict_chunk(self, images, state, task) -> np.ndarray:

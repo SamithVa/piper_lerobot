@@ -40,3 +40,7 @@ def test_dummy_fail_flag_and_reset():
         adapter.predict_chunk({}, np.zeros(14), "")
     adapter.reset()
     assert adapter.reset_count == 1
+
+
+def test_dummy_info_reports_null_checkpoint():
+    assert make_adapter("dummy").info()["checkpoint"] is None
