@@ -80,6 +80,48 @@ launch.py ──spawns/reuses──▶ server.py (policy env) ◀── adapters
 - Two-env split: the client always runs in base python (pyAgxArm + cameras);
   each policy serves from its own env.
 
+### RTC (smooth chunk transitions)
+
+pi05 chunks are sampled independently by flow matching, so each chunk swap
+commanded a small trajectory jump — visible jerk roughly every half chunk
+(~0.8s at 30fps). RTC ([lerobot's real-time chunking](https://huggingface.co/docs/lerobot/rtc))
+guides the first `rtc_execution_horizon` rows of each new chunk to continue
+the previous chunk's leftover instead of resampling from scratch.
+
+How it flows here: the client sends `consumed`/`delay_ticks` with each
+observation; server-side `LerobotAdapter` keeps the previous raw (normalized)
+chunk and passes `prev_chunk_left_over` + `inference_delay` into
+`predict_action_chunk`; the client warms the guidance path with a second
+blocking predict before the arm moves.
+
+Knobs (preset `server.args`): `rtc` (`"1"`/`"0"`), `rtc_schedule` (`exp`),
+`rtc_execution_horizon` (default 10), `rtc_guidance` (default 10.0), `compile`
+(`"0"` shipped — see below). Nothing new on the client side; `chunk_threshold`
+stays 0.5.
+
+Diagnostic (no robot needed):
+
+```bash
+PYTHONPATH=src:. /home/embodied/miniconda3/envs/lerobot_pi05/bin/python \
+    -m deploy.probe_rtc --server=http://127.0.0.1:8080
+```
+
+reports per-predict latency and chunk-boundary continuity.
+
+**Verification (2026-07-09, RTX-class 49GB GPU, `outputs/pi05`).** Compiled
+(`max-autotune`) + RTC crashed on the 2nd predict — cudagraph thread-local
+state vs per-request threads — fixed by pinning inference to one worker
+thread in `deploy/server.py` (commit `2da2392`), then measured 3.3-3.8s/predict
+(autograd guidance defeats the compiled graph). Eager (`compile=0`): 0.19s
+steady-state predict, 0.62s first predict (no compile cold start); continuity
+mean|Δ| over the 10-row guidance window 0.0035 vs 0.0095 without RTC — frozen
+prefix rows ~0.0008 (12x tighter), blend rows releasing 0.0036→0.0075. Per the
+plan's decision matrix (ship if L < 0.7s): **ship RTC with `compile=0`**.
+
+Operational note: the launcher refuses to reuse a warm server whose RTC mode
+differs from the preset (old servers report no `rtc` field → treated as
+RTC-off) — stop the old server on the port first.
+
 ## Tests
 
 ```bash

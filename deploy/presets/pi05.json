@@ -5,7 +5,8 @@
     "lerobot_pi05 env = clone of the lerobot env with transformers pinned to 5.3.0; pythonpath puts the v0.5.1 lerobot source worktree first.",
     "HF_HUB_OFFLINE: the box's proxy is SOCKS (python can't use it); the gated paligemma tokenizer loads from the HF cache.",
     "pi05 image keys are the raw camera names, hence the identity camera_map.",
-    "See README 'This machine's setup notes' for the full story."
+    "See README 'This machine's setup notes' for the full story.",
+    "compile=0: eager serving measured FASTER than torch.compile for RTC (0.19s vs 3.4s/predict; autograd guidance breaks the compiled graph) and kills the 15-20s cold start. See README RTC section."
   ],
   "server": {
     "python": "/home/embodied/miniconda3/envs/lerobot_pi05/bin/python",
@@ -17,7 +18,7 @@
       "TRANSFORMERS_OFFLINE": "1"
     },
     "adapter": "lerobot",
-    "args": {"checkpoint": "outputs/pi05", "device": "cuda", "fps": "30", "rtc": "1", "rtc_schedule": "exp"},
+    "args": {"checkpoint": "outputs/pi05", "device": "cuda", "fps": "30", "rtc": "1", "rtc_schedule": "exp", "compile": "0"},
     "port": 8080
   },
   "client": {
