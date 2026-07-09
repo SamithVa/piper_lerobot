@@ -55,7 +55,7 @@ def make_handler(adapter):
                 length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(length)
                 if self.path == "/predict":
-                    images, state, task = protocol.decode_observation(body)
+                    images, state, task, _meta = protocol.decode_observation(body)
                     with lock:
                         chunk = adapter.predict_chunk(images, state, task)
                     self._send(200, protocol.encode_chunk(chunk))

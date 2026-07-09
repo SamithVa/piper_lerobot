@@ -13,7 +13,7 @@ def test_observation_roundtrip():
     payload = protocol.encode_observation(images, state, "stack the cup")
     assert isinstance(payload, bytes)
 
-    images2, state2, task2 = protocol.decode_observation(payload)
+    images2, state2, task2, _meta = protocol.decode_observation(payload)
     assert task2 == "stack the cup"
     np.testing.assert_array_equal(state2, state)
     assert set(images2) == {"camera1", "camera2"}
@@ -23,7 +23,7 @@ def test_observation_roundtrip():
 
 def test_observation_accepts_list_state_and_unicode_task():
     payload = protocol.encode_observation({}, [0.0, 1.0], "叠杯子")
-    images, state, task = protocol.decode_observation(payload)
+    images, state, task, _meta = protocol.decode_observation(payload)
     assert images == {}
     assert state.dtype == np.float32
     assert task == "叠杯子"
@@ -39,3 +39,16 @@ def test_chunk_roundtrip():
 def test_chunk_casts_to_float32():
     out = protocol.decode_chunk(protocol.encode_chunk(np.zeros((5, 3), dtype=np.float64)))
     assert out.dtype == np.float32
+
+
+def test_observation_meta_roundtrip():
+    payload = protocol.encode_observation({}, [0.0], "t", consumed=17, delay_ticks=5)
+    _, _, _, meta = protocol.decode_observation(payload)
+    assert meta == {"consumed": 17, "delay_ticks": 5}
+
+
+def test_observation_meta_defaults_when_absent():
+    # A payload built by an older client has no meta arrays.
+    payload = protocol.encode_observation({}, [0.0], "t")
+    _, _, _, meta = protocol.decode_observation(payload)
+    assert meta == {"consumed": -1, "delay_ticks": 0}
