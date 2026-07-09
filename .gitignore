@@ -189,3 +189,5 @@ dataset/
 
 # vendored pyAgxArm SDK checkout (installed editable; not tracked here)
 third_party/pyAgxArm/
+
+deploy/logs/
