@@ -11,10 +11,10 @@ Your `hf` login must have WRITE access to the target repo_id's namespace
 
 Usage:
     # push under the same name the folder was recorded as
-    python utils/push_dataset.py --root dataset/jokeru/bimanual_test --repo-id samithva/bimanual_test
+    python utils/push_dataset.py --root dataset/samithva/bimanual_test --repo-id samithva/bimanual_test
 
     # keep it private
-    python utils/push_dataset.py --root dataset/jokeru/bimanual_test --repo-id samithva/bimanual_test --private
+    python utils/push_dataset.py --root dataset/samithva/bimanual_test --repo-id samithva/bimanual_test --private
 """
 import argparse
 
