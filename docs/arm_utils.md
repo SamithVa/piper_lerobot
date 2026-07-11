@@ -14,8 +14,6 @@ python utils/gentle_disable_arm.py left_follower --duration 3.0 --kp 12 --kd 1.2
 python utils/gentle_disable_arm.py left_follower --no-home # 跳过回 home，从当前姿态软放下
 ````
 
-can 名称参照 [utils/cameras.md](../utils/cameras.md)。
-
 kp/kd/duration 需在真机上微调：kd 越大放下越慢越软（过大会抖动），duration 为 kp 降到 0 的时长，
 --home-speed 为回 home 的速度百分比（默认 15，较慢）。
 

@@ -59,8 +59,6 @@ bash utils/can_activate.sh can_follower 1000000 "1-8.3:1.0"
 sudo bash utils/setup_camera_symlinks.sh
 ````
 
-相机接线与端口对照参见 [utils/cameras.md](../utils/cameras.md)。
-
 ### 测试相机
 
 注意两个相机不能从同一个扩展坞连接电脑，否则可能读取会出问题。
@@ -72,10 +70,3 @@ guvcview --device=/dev/top      # 测试 top 相机
 guvcview --device=/dev/r_wrist  # 测试 r_wrist 相机
 ````
 
-带宽排查工具：
-
-````
-python utils/bandwidth_debug.py     # 相机带宽诊断
-bash utils/which_usb_bus.sh         # 查看设备挂在哪条 USB 总线
-python utils/capture_cameras.py     # 抓拍各相机画面
-````
