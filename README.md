@@ -10,7 +10,7 @@ teleoperation, dataset recording, ACT/pi05 training, and real-robot deployment.
 - `piper_follower` and `bi_piper_follower` robot configurations
 - Bimanual leader/follower control with optional EMA smoothing
 - Asynchronous video encoding during dataset recording
-- CAN setup, camera naming, homing, gripper, and safe-disable utilities
+- CAN setup, camera setup, gripper calibration, and safe-disable utilities
 - Local, RTC, and asynchronous policy inference
 
 ## Installation
@@ -54,8 +54,21 @@ disable utility:
 python utils/gentle_disable_arm.py
 ```
 
-Connect high-bandwidth cameras to separate USB buses. Diagnose camera issues
-with `bash utils/which_usb_bus.sh` and `python utils/bandwidth_debug.py`.
+Connect high-bandwidth cameras to separate USB buses. Use
+`python utils/capture_cameras.py` to verify the configured camera feeds.
+
+## Utilities
+
+- `activate_all_can.sh` — activate all configured Piper CAN interfaces
+- `find_all_can_port.sh` — find connected CAN adapters
+- `can_activate.sh` — activate one CAN interface
+- `can_health.sh` — inspect CAN interface health
+- `setup_camera_symlinks.sh` — install stable camera device names using
+  `99-camera-symlinks.rules`
+- `capture_cameras.py` — capture test frames from the cameras
+- `gentle_disable_arm.py` — lower and safely disable Piper arms
+- `gripper_zero_calibration.py` — calibrate a gripper's closed position
+- `push_dataset.py` — upload a local dataset to Hugging Face Hub
 
 ## Documentation
 
@@ -66,4 +79,3 @@ with `bash utils/which_usb_bus.sh` and `python utils/bandwidth_debug.py`.
 - [Training](docs/training.md)
 - [Inference and deployment](docs/inference.md)
 - [Arm utilities](docs/arm_utils.md)
-- [Camera and CAN mapping](utils/cameras.md)

@@ -10,7 +10,7 @@ ACT/pi05 训练和真机部署。
 - `piper_follower` 和 `bi_piper_follower` 机器人配置
 - 双臂主从控制与可选 EMA 平滑
 - 数据采集期间异步编码视频
-- CAN、相机命名、回零、夹爪和安全失能工具
+- CAN 设置、相机设置、夹爪校准和安全失能工具
 - 本地、RTC 和异步策略推理
 
 ## 安装
@@ -51,8 +51,20 @@ bash record_bimanual.sh <repo_id> <task> <num_episodes>
 python utils/gentle_disable_arm.py
 ```
 
-高带宽相机应连接到不同的 USB 总线。相机异常时可运行
-`bash utils/which_usb_bus.sh` 和 `python utils/bandwidth_debug.py` 排查。
+高带宽相机应连接到不同的 USB 总线。可运行
+`python utils/capture_cameras.py` 检查已配置的相机画面。
+
+## 工具脚本
+
+- `activate_all_can.sh` — 激活所有已配置的 Piper CAN 接口
+- `find_all_can_port.sh` — 查找已连接的 CAN 适配器
+- `can_activate.sh` — 激活单个 CAN 接口
+- `can_health.sh` — 检查 CAN 接口状态
+- `setup_camera_symlinks.sh` — 使用 `99-camera-symlinks.rules` 安装稳定的相机设备名
+- `capture_cameras.py` — 抓取相机测试画面
+- `gentle_disable_arm.py` — 缓慢放下并安全失能 Piper 机械臂
+- `gripper_zero_calibration.py` — 校准夹爪闭合零点
+- `push_dataset.py` — 将本地数据集上传至 Hugging Face Hub
 
 ## 文档
 
@@ -63,4 +75,3 @@ python utils/gentle_disable_arm.py
 - [训练](docs/training.md)
 - [推理与部署](docs/inference.md)
 - [机械臂工具](docs/arm_utils.md)
-- [相机与 CAN 对照](utils/cameras.md)
