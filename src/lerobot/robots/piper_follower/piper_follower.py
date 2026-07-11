@@ -163,6 +163,7 @@ class PIPERFollower(Robot):
         print("piper gently disabling (home + soft release)...")
         self.bus.gentle_disable()
         print("piper gently disabled")
+        self.bus.disconnect()
 
         if len(self.cameras) > 0:
             for cam in self.cameras.values():

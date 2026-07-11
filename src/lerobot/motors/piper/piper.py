@@ -1,3 +1,4 @@
+import random
 import time
 from dataclasses import dataclass
 from typing import Dict
@@ -10,6 +11,31 @@ from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, PiperFW
 # gripper by 1e6). pyAgxArm reports rad / m, so we convert back at the boundary.
 JOINT_RAD_TO_RAW = 57324.840764
 GRIPPER_M_TO_RAW = 1_000_000.0  # meters -> raw (~micrometers); leader divides by 1e6
+GRIPPER_CMD_FORCE_N = 3.0  # policy/gripper action force used by send_action()
+
+# Enable-retry pacing. pyAgxArm's enable(255) is fire-once-check-once: it sends a
+# single enable frame and returns whether all joints ALREADY report enabled -- it
+# does not wait or retry internally, so connect() re-drives it in a loop. Sending
+# that frame at a fixed 10 Hz floods the socketcan tx queue, and an overflowed
+# queue silently DROPS frames (ENOBUFS in CanComm.send -> return, no raise), which
+# can drop the very enable frame we're retrying -- so hammering makes the stall
+# worse and shows up as long "piper initing" bursts. Back off instead: start fast,
+# grow geometrically, cap so we still retry often enough within the outer timeout
+# and give feedback frames (which carry driver_enable_status) time to arrive.
+ENABLE_RETRY_BASE_S = 0.1
+ENABLE_RETRY_FACTOR = 1.6
+ENABLE_RETRY_CAP_S = 0.5
+# One-shot randomized stagger before the first enable frame. When several arms are
+# brought up back-to-back (bi-arm follower, multi-arm rigs) their enable bursts
+# otherwise hit the shared bus in lockstep and overflow the tx queue together; a
+# small per-arm jitter decorrelates them.
+ENABLE_INITIAL_JITTER_S = 0.2
+
+
+def _enable_retry_delay(attempt: int) -> float:
+    """Backoff (seconds) before enable retry #``attempt`` (0-based): capped
+    exponential. attempt=0 -> BASE, growing by FACTOR up to CAP."""
+    return min(ENABLE_RETRY_CAP_S, ENABLE_RETRY_BASE_S * (ENABLE_RETRY_FACTOR ** attempt))
 
 
 @dataclass
@@ -39,6 +65,10 @@ class PiperMotorsBus:
         self.robot.connect()  # start the shared read thread (arm + gripper feedback)
         self.motors = config.motors
         self._speed_pct = None
+        # move_j velocity limit (percent) used by write(). Default 50 preserves the
+        # old hardcoded behavior; deploy can lower it (client --speed) to slew more
+        # slowly toward each target, which low-passes noisy action commands.
+        self.speed_percent = 50
         # 录制数据集时改成0
         self.init_joint_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # [6 joints + 1 gripper]
         self.safe_disable_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -64,13 +94,18 @@ class PiperMotorsBus:
             self.robot.set_speed_percent(pct)
             self._speed_pct = pct
 
-    def connect(self, enable: bool, timeout: float = 10) -> bool:
+    def connect(self, enable: bool, timeout: float = 10, command_gripper: bool = True) -> bool:
         '''
             使能机械臂并检测使能状态; 若使能超时则返回 False (由调用方重试)。
             timeout: 使能等待上限(秒)。从冷/失能状态使能较慢, 给足时间避免误判未使能。
         '''
         enable_flag = False
         loop_flag = False
+        if enable:
+            # Stagger before the enable deadline starts: decorrelate simultaneous
+            # multi-arm enable bursts so their frames don't overflow the shared tx
+            # queue in lockstep (see ENABLE_INITIAL_JITTER_S).
+            time.sleep(random.uniform(0.0, ENABLE_INITIAL_JITTER_S))
         start_time = time.time()
         while not (loop_flag):
             elapsed_time = time.time() - start_time
@@ -89,13 +124,23 @@ class PiperMotorsBus:
                 # blocks both the outer timeout and the caller's retry. On
                 # timeout, fall through -> outer loop returns False -> caller
                 # retries / raises loudly.
+                attempt = 0
                 while not self.robot.enable(255):
                     if time.time() - start_time > timeout:
                         print("enable timed out (motors never reported enabled)")
                         break
                     print('piper initing')
-                    time.sleep(0.1)
-                self.gripper.move_gripper_m(0.0, 1.0)  # close gripper (was GripperCtrl enable)
+                    # Back off instead of a fixed 10 Hz resend: hammering the bus
+                    # overflows the tx queue and drops the enable frame we're
+                    # retrying (ENOBUFS), so easing off actually enables faster.
+                    time.sleep(_enable_retry_delay(attempt))
+                    attempt += 1
+                if command_gripper:
+                    self.gripper.move_gripper_m(0.0, 1.0)  # follower: enable at closed position
+                else:
+                    # A physical leader gripper must remain hand-operable while
+                    # its position feedback is used as the follower command.
+                    self.gripper.disable_gripper()
             else:
                 # move to safe disconnect position
                 enable_flag = any(enable_list)
@@ -236,10 +281,10 @@ class PiperMotorsBus:
             Joint control
             - target_joint: 前 6 个为关节角度 (弧度), 第 7 个为夹爪行程 (米, 0~0.08)
         """
-        self._ensure_speed(50)
+        self._ensure_speed(self.speed_percent)
         self.robot.move_j([float(target_joint[i]) for i in range(6)])
         gripper_m = abs(float(target_joint[6]))
-        self.gripper.move_gripper_m(gripper_m, 1.0)
+        self.gripper.move_gripper_m(gripper_m, GRIPPER_CMD_FORCE_N)
 
     def read(self) -> Dict:
         """
@@ -266,6 +311,10 @@ class PiperMotorsBus:
     def safe_disconnect(self):
         """Move to safe disconnect position"""
         self.write(target_joint=self.safe_disable_position)
+
+    def disconnect(self) -> None:
+        """Close pyAgxArm's transport/read thread without changing OS CAN state."""
+        self.robot.disconnect()
 
     def gentle_disable(self, kp0: float = 10.0, kd: float = 0.8, duration: float = 2.0,
                        go_home: bool = True, home_speed: int = 15, settle: float = 0.6):

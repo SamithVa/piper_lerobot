@@ -74,7 +74,7 @@ class PIPERLeader(Teleoperator):
         # Verify+retry enable: bus.connect() returns False on enable timeout, and
         # a not-fully-enabled leader silently produces bad teleop actions.
         for attempt in range(3):
-            if self.bus.connect(enable=True):
+            if self.bus.connect(enable=True, command_gripper=False):
                 break
             print(f"piper leader enable timed out, retry {attempt + 1}/3...")
         else:
@@ -92,7 +92,9 @@ class PIPERLeader(Teleoperator):
         if not self._is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
-        self.bus.apply_calibration_master()
+        # Piper leaders expose absolute hardware feedback and require no motion
+        # calibration. In particular, never route leader setup through the
+        # generic bus writer because it actively commands the gripper closed.
         self._is_calibrated = True
 
     def get_action(self) -> dict[str, float]:

@@ -14,7 +14,12 @@ Runnable two ways:
 
 from types import SimpleNamespace
 
-from lerobot.motors.piper.piper import PiperMotorsBus
+from lerobot.motors.piper.piper import (
+    ENABLE_RETRY_BASE_S,
+    ENABLE_RETRY_CAP_S,
+    PiperMotorsBus,
+    _enable_retry_delay,
+)
 
 
 def _resolve(v):
@@ -41,6 +46,7 @@ class FakeRobot:
         self._enabled = enabled
         self._joint_hz = joint_hz
         self._moves = moves
+        self.disconnect_called = False
         # Start ~1 rad from home so move_to_home has to actually drive there.
         self._joints_rad = [1.0] * 6
 
@@ -75,17 +81,25 @@ class FakeRobot:
     def move_mit(self, **kwargs):
         pass
 
+    def disconnect(self):
+        self.disconnect_called = True
+
 
 class FakeGripper:
     """Stand-in for the pyAgxArm gripper effector driver."""
 
+    def __init__(self):
+        self.moves = []
+        self.disable_calls = 0
+
     def move_gripper_m(self, value=0.0, force=1.0):
-        pass
+        self.moves.append((value, force))
 
     def get_gripper_status(self):
         return _Msg(SimpleNamespace(value=0.0, force=0.0, mode="width", foc_status=None))
 
     def disable_gripper(self):
+        self.disable_calls += 1
         return True
 
 
@@ -112,6 +126,24 @@ def test_connect_fails_when_feedback_not_flowing():
 def test_connect_succeeds_when_enabled_and_feedback_live():
     bus = _make_bus(FakeRobot(enabled=True, joint_hz=30.0))
     assert bus.connect(enable=True) is True
+
+
+def test_connect_passive_gripper_disables_without_commanding_motion():
+    gripper = FakeGripper()
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=30.0), gripper)
+
+    assert bus.connect(enable=True, command_gripper=False) is True
+    assert gripper.disable_calls == 1
+    assert gripper.moves == []
+
+
+def test_connect_active_gripper_preserves_default_close_command():
+    gripper = FakeGripper()
+    bus = _make_bus(FakeRobot(enabled=True, joint_hz=30.0), gripper)
+
+    assert bus.connect(enable=True) is True
+    assert gripper.disable_calls == 0
+    assert gripper.moves == [(0.0, 1.0)]
 
 
 # --- readiness-gate unit checks (fast, no 10s enable loop) ------------------
@@ -173,6 +205,53 @@ def test_connect_terminates_when_enable_never_succeeds():
     elapsed = _time.time() - start
     assert result is False
     assert elapsed < 5.0, f"connect() took {elapsed:.1f}s -- inner enable loop is unbounded"
+
+
+# --- enable-retry backoff (don't flood the tx queue while retrying) ----------
+
+def test_enable_retry_delay_starts_at_base():
+    assert _enable_retry_delay(0) == ENABLE_RETRY_BASE_S
+
+
+def test_enable_retry_delay_is_monotonic_nondecreasing():
+    delays = [_enable_retry_delay(i) for i in range(10)]
+    assert delays == sorted(delays)
+    assert delays[1] > delays[0]  # actually grows, not flat
+
+
+def test_enable_retry_delay_capped():
+    # Even for a huge attempt count the delay never exceeds the cap (so we keep
+    # retrying often enough to catch the enable within the outer timeout).
+    assert _enable_retry_delay(100) == ENABLE_RETRY_CAP_S
+    assert all(_enable_retry_delay(i) <= ENABLE_RETRY_CAP_S for i in range(100))
+
+
+def test_enable_loop_backs_off_instead_of_fixed_rate():
+    """The retry loop must BACK OFF, not resend enable at a fixed 10 Hz: fixed-
+    rate hammering overflows the CAN tx queue and drops the very enable frame
+    being retried. Over a ~1s window a backing-off loop issues far fewer enable()
+    calls than the old fixed 0.1s loop (which would be ~10+)."""
+    calls = {"n": 0}
+    robot = FakeRobot(enabled=False, joint_hz=0.0)
+    inner = robot.enable
+
+    def counting_enable(joint_index=255):
+        calls["n"] += 1
+        return inner(joint_index)
+
+    robot.enable = counting_enable
+    bus = _make_bus(robot)
+    bus.connect(enable=True, timeout=1.0)
+    assert calls["n"] < 10, f"expected backoff (few resends), got {calls['n']} (fixed 10 Hz would be ~10+)"
+
+
+def test_disconnect_closes_pyagxarm_transport():
+    """Disconnect must release pyAgxArm's socket/read thread, not only disable
+    torque, so the next client run starts from a clean SDK transport."""
+    robot = FakeRobot()
+    bus = _make_bus(robot)
+    bus.disconnect()
+    assert robot.disconnect_called
 
 
 if __name__ == "__main__":
