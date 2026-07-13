@@ -146,6 +146,28 @@ def test_connect_active_gripper_preserves_default_close_command():
     assert gripper.moves == [(0.0, 1.0)]
 
 
+def test_connect_uses_fresh_status_after_enable():
+    """A cold-start enable that succeeds on the first command must not be
+    rejected because connect() cached the disabled state before the command."""
+    robot = FakeRobot(enabled=False, joint_hz=30.0)
+
+    def enable_and_update(joint_index=255):
+        robot._enabled = True
+        return True
+
+    robot.enable = enable_and_update
+    bus = _make_bus(robot)
+    assert bus.connect(enable=True) is True
+
+
+def test_failed_enable_does_not_command_gripper():
+    gripper = FakeGripper()
+    bus = _make_bus(FakeRobot(enabled=False, joint_hz=0.0), gripper)
+
+    assert bus.connect(enable=True, timeout=0.1) is False
+    assert gripper.moves == []
+
+
 # --- readiness-gate unit checks (fast, no 10s enable loop) ------------------
 
 def test_is_ready_false_when_disabled():

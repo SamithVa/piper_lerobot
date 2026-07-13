@@ -27,6 +27,13 @@ from ..config import RobotConfig
 class PIPERFollowerConfig(RobotConfig):
     # CAN interface name for this follower arm (see 99-piper-can.rules)
     can_name: str = "left_follower"
+    # Keep move_j as the global default. Bimanual data collection explicitly
+    # opts into the filtered move_js follower mode in record_bimanual.sh.
+    teleop_control_mode: str = "move_j"
+    teleop_control_hz: float = 50.0
+    max_velocity_deg_s: float = 45.0
+    max_acceleration_deg_s2: float = 200.0
+    max_tracking_error_deg: float = 12.0
     #cameras: dict[str, CameraConfig] = field(default_factory=dict)
     # # cameras
     cameras: dict[str, CameraConfig] = field(
