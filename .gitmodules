@@ -1,0 +1,3 @@
+[submodule "deploy_piper"]
+	path = deploy_piper
+	url = https://github.com/thusigs-eilab/deploy_piper.git
