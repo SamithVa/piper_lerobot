@@ -16,6 +16,8 @@
 
 """Tests for RTC configuration module."""
 
+import pytest
+
 from lerobot.configs.types import RTCAttentionSchedule
 from lerobot.policies.rtc.configuration_rtc import RTCConfig
 
@@ -29,6 +31,7 @@ def test_rtc_config_default_initialization():
     assert config.enabled is False
     assert config.prefix_attention_schedule == RTCAttentionSchedule.LINEAR
     assert config.max_guidance_weight == 10.0
+    assert config.prior_data_std == 1.0
     assert config.execution_horizon == 10
     assert config.debug is False
     assert config.debug_maxlen == 100
@@ -40,6 +43,7 @@ def test_rtc_config_custom_initialization():
         enabled=True,
         prefix_attention_schedule=RTCAttentionSchedule.EXP,
         max_guidance_weight=5.0,
+        prior_data_std=0.2,
         execution_horizon=20,
         debug=True,
         debug_maxlen=200,
@@ -48,6 +52,7 @@ def test_rtc_config_custom_initialization():
     assert config.enabled is True
     assert config.prefix_attention_schedule == RTCAttentionSchedule.EXP
     assert config.max_guidance_weight == 5.0
+    assert config.prior_data_std == 0.2
     assert config.execution_horizon == 20
     assert config.debug is True
     assert config.debug_maxlen == 200
@@ -63,3 +68,8 @@ def test_rtc_config_partial_initialization():
     assert config.prefix_attention_schedule == RTCAttentionSchedule.LINEAR
     assert config.execution_horizon == 10
     assert config.debug is False
+
+
+def test_rtc_config_rejects_non_positive_prior_data_std():
+    with pytest.raises(ValueError, match="prior_data_std"):
+        RTCConfig(prior_data_std=0.0)

@@ -434,6 +434,35 @@ def test_denoise_step_with_prev_chunk(rtc_processor_debug_disabled):
     assert torch.allclose(result, expected_result, atol=1e-4)
 
 
+def test_smaller_prior_data_std_increases_unclipped_guidance():
+    x_t = torch.ones(1, 20, 1)
+    prev_chunk = torch.zeros_like(x_t)
+
+    def mock_denoiser(x):
+        return x * 0.5
+
+    weights = []
+    for prior_data_std in (1.0, 0.2):
+        processor = RTCProcessor(
+            RTCConfig(
+                debug=True,
+                max_guidance_weight=100.0,
+                prior_data_std=prior_data_std,
+            )
+        )
+        processor.denoise_step(
+            x_t=x_t,
+            prev_chunk_left_over=prev_chunk,
+            inference_delay=5,
+            time=torch.tensor(0.5),
+            original_denoise_step_partial=mock_denoiser,
+        )
+        weights.append(processor.get_all_debug_steps()[0].guidance_weight)
+
+    assert torch.allclose(weights[0], torch.tensor(2.0))
+    assert torch.allclose(weights[1], torch.tensor(26.0))
+
+
 def test_denoise_step_adds_batch_dimension():
     """Test denoise_step handles 2D input by adding batch dimension."""
     config = RTCConfig(execution_horizon=10, max_guidance_weight=5.0)
