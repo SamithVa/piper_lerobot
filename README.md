@@ -42,6 +42,22 @@ sudo bash utils/setup_camera_symlinks.sh
 bash record_bimanual.sh <repo_id> <task> <num_episodes>
 ```
 
+## Record a single-arm dataset
+
+Prepare the matching follower and leader CAN interfaces, then run the recorder
+for the left or right arm:
+
+```bash
+bash record_single_arm.sh left <repo_id> <task> <num_episodes>
+bash record_single_arm.sh right <repo_id> <task> <num_episodes>
+```
+
+The single-arm recorder uses the matching wrist camera and the top camera,
+saves locally under `dataset/<repo_id>/`, and does not upload to the Hub. Its
+datasets contain one Piper arm (7 action/state values), so they are intended
+for a single-arm policy and are not directly compatible with the current
+14-value bimanual policy.
+
 Recording keys: `Space` starts an episode, `Right Arrow` finishes it,
 `Left Arrow` retries it, and `Esc` ends the session.
 
