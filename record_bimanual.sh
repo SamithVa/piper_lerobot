@@ -12,9 +12,9 @@ set -e
 REPO=/data/wanshan/VLAs/piper_lerobot
 PY=/home/embodied/miniconda3/bin/python
 
-REPO_ID="${1:-samithva/bimanual_stack_cup_on_bowl_4}"
+REPO_ID="${1:-samithva/test_3}"
 TASK="${2:-Stack the cup on top of the bowl.}"
-NUM_EP="${3:-30}"
+NUM_EP="${3:-1}"
 
 # Save datasets under this repo's ./dataset/<repo_id> instead of ~/.cache/huggingface/lerobot.
 DATASET_ROOT="$REPO/dataset/$REPO_ID"
@@ -23,9 +23,9 @@ DATASET_ROOT="$REPO/dataset/$REPO_ID"
 # USB cams) at 640x480. MJPG@640x480 on these cameras only offers 120fps; the record
 # loop still samples at 30fps. Compressed ~2 MB/s each -> all 3 fit the shared bus.
 CAMERAS='{
-  "l_wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 480, "height": 640, "fps": 120, "rotation": -90, "fourcc": "MJPG"},
-  "top":     {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 120, "rotation": 0,   "fourcc": "MJPG"},
-  "r_wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 480, "height": 640, "fps": 120, "rotation": 90,  "fourcc": "MJPG"}
+  "l_wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 480, "height": 640, "fps": 30, "rotation": -90, "fourcc": "MJPG"},
+  "top":     {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 30, "rotation": 0,   "fourcc": "MJPG"},
+  "r_wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 480, "height": 640, "fps": 30, "rotation": 90,  "fourcc": "MJPG"}
 }'
 
 PYTHONPATH="$REPO/src" "$PY" -m lerobot.scripts.lerobot_record \
@@ -44,6 +44,6 @@ PYTHONPATH="$REPO/src" "$PY" -m lerobot.scripts.lerobot_record \
   --dataset.video_encoding_batch_size=30 \
   --dataset.async_video_encoding=true \
   --dataset.reset_time_s=0 \
-  --dataset.episode_time_s=30 \
-  --dataset.push_to_hub=true
+  --dataset.episode_time_s=6000 \
+  --dataset.push_to_hub=false
  
