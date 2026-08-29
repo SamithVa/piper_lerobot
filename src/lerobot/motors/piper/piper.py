@@ -129,12 +129,17 @@ class PiperMotorsBus:
                     if time.time() - start_time > timeout:
                         print("enable timed out (motors never reported enabled)")
                         break
-                    print('piper initing')
                     # Back off instead of a fixed 10 Hz resend: hammering the bus
                     # overflows the tx queue and drops the enable frame we're
                     # retrying (ENOBUFS), so easing off actually enables faster.
                     time.sleep(_enable_retry_delay(attempt))
                     attempt += 1
+                # The snapshot above was taken before the retry loop. Refresh it
+                # after enable() succeeds, otherwise a successful first enable
+                # is incorrectly treated as disabled until another outer pass.
+                enable_flag = self._all_motors_enabled()
+                if not enable_flag:
+                    return False
                 if command_gripper:
                     self.gripper.move_gripper_m(0.0, 1.0)  # follower: enable at closed position
                 else:

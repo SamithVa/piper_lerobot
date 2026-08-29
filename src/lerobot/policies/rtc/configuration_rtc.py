@@ -41,6 +41,10 @@ class RTCConfig:
     # Todo change to exp
     prefix_attention_schedule: RTCAttentionSchedule = RTCAttentionSchedule.LINEAR
     max_guidance_weight: float = 10.0
+    # Standard deviation of the action prior conditioned on the observation.
+    # 1.0 preserves the original RTC derivation. Smaller values apply the
+    # stronger guidance proposed by Soare (2025) for narrow action priors.
+    prior_data_std: float = 1.0
     execution_horizon: int = 10
 
     # Debug settings
@@ -51,5 +55,7 @@ class RTCConfig:
         """Validate RTC configuration parameters."""
         if self.max_guidance_weight <= 0:
             raise ValueError(f"max_guidance_weight must be positive, got {self.max_guidance_weight}")
+        if self.prior_data_std <= 0:
+            raise ValueError(f"prior_data_std must be positive, got {self.prior_data_std}")
         if self.debug_maxlen <= 0:
             raise ValueError(f"debug_maxlen must be positive, got {self.debug_maxlen}")
