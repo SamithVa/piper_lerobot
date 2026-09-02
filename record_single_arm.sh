@@ -13,16 +13,16 @@ case "$ARM" in
     FOLLOWER=left_follower
     LEADER=left_leader
     CAMERAS='{
-      "wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 480, "height": 640, "fps": 30, "rotation": -90, "fourcc": "MJPG"},
-      "top":   {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 30, "fourcc": "MJPG"}
+      "wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
+      "top":   {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"}
     }'
     ;;
   right)
     FOLLOWER=right_follower
     LEADER=right_leader
     CAMERAS='{
-      "wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 480, "height": 640, "fps": 30, "rotation": 90, "fourcc": "MJPG"},
-      "top":   {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 30, "fourcc": "MJPG"}
+      "wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
+      "top":   {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"}
     }'
     ;;
   *)
@@ -44,7 +44,7 @@ PYTHONPATH="$ROOT/src" "$PY" -m lerobot.scripts.lerobot_record \
   --dataset.root="$ROOT/dataset/$DATASET" \
   --dataset.single_task="$TASK" \
   --dataset.num_episodes="$EPISODES" \
-  --dataset.num_image_writer_processes=4 \
+  --dataset.num_image_writer_processes=16 \
   --dataset.video_encoding_batch_size=10 \
   --dataset.async_video_encoding=true \
   --dataset.reset_time_s=0 \

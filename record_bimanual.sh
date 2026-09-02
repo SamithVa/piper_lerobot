@@ -23,9 +23,9 @@ DATASET_ROOT="$REPO/dataset/$REPO_ID"
 # USB cams) at 640x480. MJPG@640x480 on these cameras only offers 120fps; the record
 # loop still samples at 30fps. Compressed ~2 MB/s each -> all 3 fit the shared bus.
 CAMERAS='{
-  "l_wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 480, "height": 640, "fps": 30, "rotation": -90, "fourcc": "MJPG"},
-  "top":     {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 30, "rotation": 0,   "fourcc": "MJPG"},
-  "r_wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 480, "height": 640, "fps": 30, "rotation": 90,  "fourcc": "MJPG"}
+  "l_wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
+  "top":     {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
+  "r_wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"}
 }'
 
 PYTHONPATH="$REPO/src" "$PY" -m lerobot.scripts.lerobot_record \
@@ -46,4 +46,3 @@ PYTHONPATH="$REPO/src" "$PY" -m lerobot.scripts.lerobot_record \
   --dataset.reset_time_s=0 \
   --dataset.episode_time_s=6000 \
   --dataset.push_to_hub=false
- 

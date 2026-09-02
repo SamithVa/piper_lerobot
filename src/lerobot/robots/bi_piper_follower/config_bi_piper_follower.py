@@ -32,15 +32,12 @@ class BiPiperFollowerConfig(RobotConfig):
     # cameras (shared between both arms)
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            # Native camera mode is 640x480; wrist cams use rotation=±90 so the
-            # capture request swaps to 640x480 (see camera_opencv rotation handling).
             # fourcc="MJPG" streams compressed so all 3 fit on one USB controller.
             "l_wrist": OpenCVCameraConfig(
                 index_or_path="/dev/l_wrist",
                 fps=120,  # MJPG @ 640x480 only supports 120fps; record loop still samples at 30
-                width=480,
-                height=640,
-                rotation=-90,
+                width=640,
+                height=480,
                 fourcc="MJPG",
             ),
             "top": OpenCVCameraConfig(
@@ -48,15 +45,13 @@ class BiPiperFollowerConfig(RobotConfig):
                 fps=120,  # MJPG @ 640x480 only supports 120fps; record loop still samples at 30
                 width=640,
                 height=480,
-                rotation=0,
                 fourcc="MJPG",
             ),
             "r_wrist": OpenCVCameraConfig(
                 index_or_path="/dev/r_wrist",
                 fps=120,  # MJPG @ 640x480 only supports 120fps; record loop still samples at 30
-                width=480,
-                height=640,
-                rotation=90,
+                width=640,
+                height=480,
                 fourcc="MJPG",
             ),
         }
