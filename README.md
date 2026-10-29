@@ -61,6 +61,27 @@ for a single-arm policy and are not directly compatible with the current
 Recording keys: `Space` starts an episode, `Right Arrow` finishes it,
 `Left Arrow` retries it, and `Esc` ends the session.
 
+## Human-in-the-loop (HIL) data collection
+
+A deployed policy drives the follower while the leader mirrors it; press
+`Space` to take over with the leader, `Space` again to hand back. Every episode
+is saved with a success/failure label and a per-frame control flag for
+Recap-style training. The recorder lives in the
+[`deploy_piper`](https://github.com/thusigs-eilab/deploy_piper/tree/hil) repo
+(branch `hil`, checked out here as `deploy_piper_hil/`):
+
+```bash
+cd deploy_piper_hil
+python -m deploy.server --config pi05_long_horizon_plate --checkpoint=<ckpt>   # env lerobot_pi05
+python -m deploy.hil_record --config pi05_long_horizon_plate --task="..." \
+  --teleop.type=piper_leader --teleop.id=left_leader --teleop.can_name=left_leader \
+  --dataset.repo_id=<repo_id> --dataset.root=../dataset/<repo_id>              # env piper_sdk
+```
+
+See [HIL quick start](docs/hil.md) and the
+[full reference](https://github.com/thusigs-eilab/deploy_piper/blob/hil/docs/hil_collection.md)
+(options, keys, saved data, troubleshooting).
+
 ## Safety
 
 Do not disable or power off a raised arm directly—it can fall. Use the soft
@@ -91,6 +112,7 @@ Connect high-bandwidth cameras to separate USB buses. Use
 - [Environment and hardware setup](docs/setup.md)
 - [Teleoperation](docs/teleop.md)
 - [Dataset recording](docs/recording.md)
+- [HIL data collection](docs/hil.md) — policy-driven recording with leader takeover ([full reference](https://github.com/thusigs-eilab/deploy_piper/blob/hil/docs/hil_collection.md))
 - [Hugging Face upload](docs/huggingface.md)
 - [Training](docs/training.md)
 - [Inference and deployment](docs/inference.md)

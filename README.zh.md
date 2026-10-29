@@ -43,6 +43,25 @@ bash record_bimanual.sh <repo_id> <task> <num_episodes>
 录制按键：`空格` 开始一条 episode，`右方向键` 提前结束，`左方向键` 取消重录，
 `Esc` 结束整个会话。
 
+## 人在回路（HIL）数据采集
+
+已部署的策略驱动从臂，主臂同步跟随；按 `空格` 用主臂接管，再按 `空格` 交还给策略。
+每条 episode 都带成功/失败标签和逐帧控制标志，用于 Recap 式训练。采集脚本在
+[`deploy_piper`](https://github.com/thusigs-eilab/deploy_piper/tree/hil) 仓库（`hil` 分支，
+本地检出为 `deploy_piper_hil/`）：
+
+```bash
+cd deploy_piper_hil
+python -m deploy.server --config pi05_long_horizon_plate --checkpoint=<ckpt>   # 环境 lerobot_pi05
+python -m deploy.hil_record --config pi05_long_horizon_plate --task="..." \
+  --teleop.type=piper_leader --teleop.id=left_leader --teleop.can_name=left_leader \
+  --dataset.repo_id=<repo_id> --dataset.root=../dataset/<repo_id>              # 环境 piper_sdk
+```
+
+详见 [HIL 快速上手](docs/hil.md) 和
+[完整说明](https://github.com/thusigs-eilab/deploy_piper/blob/hil/docs/hil_collection.md)
+（参数、按键、保存内容、故障排查）。
+
 ## 安全
 
 机械臂抬起时不要直接失能或断电，否则机械臂可能砸落。请使用软失能工具：
@@ -71,6 +90,7 @@ python utils/gentle_disable_arm.py
 - [环境与硬件安装](docs/setup.md)
 - [遥操作](docs/teleop.md)
 - [数据采集](docs/recording.md)
+- [HIL 数据采集](docs/hil.md) — 策略驱动 + 主臂接管的采集（[完整说明](https://github.com/thusigs-eilab/deploy_piper/blob/hil/docs/hil_collection.md)）
 - [Hugging Face 上传](docs/huggingface.md)
 - [训练](docs/training.md)
 - [推理与部署](docs/inference.md)
