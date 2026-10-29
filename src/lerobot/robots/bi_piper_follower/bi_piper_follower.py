@@ -50,12 +50,22 @@ class BiPiperFollower(Robot):
             calibration_dir=config.calibration_dir,
             can_name=config.left_arm_can,
             cameras={},
+            teleop_control_mode=config.teleop_control_mode,
+            teleop_control_hz=config.teleop_control_hz,
+            max_velocity_deg_s=config.max_velocity_deg_s,
+            max_acceleration_deg_s2=config.max_acceleration_deg_s2,
+            max_tracking_error_deg=config.max_tracking_error_deg,
         )
         right_arm_config = PIPERFollowerConfig(
             id=f"{config.id}_right" if config.id else None,
             calibration_dir=config.calibration_dir,
             can_name=config.right_arm_can,
             cameras={},
+            teleop_control_mode=config.teleop_control_mode,
+            teleop_control_hz=config.teleop_control_hz,
+            max_velocity_deg_s=config.max_velocity_deg_s,
+            max_acceleration_deg_s2=config.max_acceleration_deg_s2,
+            max_tracking_error_deg=config.max_tracking_error_deg,
         )
 
         self.left_arm = PIPERFollower(left_arm_config)
@@ -91,6 +101,10 @@ class BiPiperFollower(Robot):
     @property
     def is_calibrated(self) -> bool:
         return self.left_arm.is_calibrated and self.right_arm.is_calibrated
+
+    @property
+    def move_js_safety_tripped(self) -> bool:
+        return self.left_arm.move_js_safety_tripped or self.right_arm.move_js_safety_tripped
 
     def connect(self) -> None:
         # Each single-arm connect() enables the arm, homes it, and marks connected.
@@ -136,7 +150,13 @@ class BiPiperFollower(Robot):
         }
 
         sent_left = self.left_arm.send_action(left_action)
-        sent_right = self.right_arm.send_action(right_action)
+        if self.left_arm.move_js_safety_tripped:
+            self.right_arm.trigger_move_js_safety_stop("paired left arm triggered its tracking watchdog")
+            sent_right = dict(self.right_arm._last_sent_action or right_action)
+        else:
+            sent_right = self.right_arm.send_action(right_action)
+            if self.right_arm.move_js_safety_tripped:
+                self.left_arm.trigger_move_js_safety_stop("paired right arm triggered its tracking watchdog")
 
         prefixed_left = {f"left_{key}": value for key, value in sent_left.items()}
         prefixed_right = {f"right_{key}": value for key, value in sent_right.items()}

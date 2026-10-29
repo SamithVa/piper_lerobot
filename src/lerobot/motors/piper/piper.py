@@ -1,3 +1,4 @@
+import math
 import random
 import time
 from dataclasses import dataclass
@@ -12,6 +13,14 @@ from pyAgxArm import create_agx_arm_config, AgxArmFactory, ArmModel, PiperFW
 JOINT_RAD_TO_RAW = 57324.840764
 GRIPPER_M_TO_RAW = 1_000_000.0  # meters -> raw (~micrometers); leader divides by 1e6
 GRIPPER_CMD_FORCE_N = 3.0  # policy/gripper action force used by send_action()
+PIPER_JOINT_LIMITS_RAD = (
+    (-2.617994, 2.617994),
+    (0.0, 3.141593),
+    (-2.967060, 0.0),
+    (-1.745330, 1.745330),
+    (-1.221730, 1.221730),
+    (-2.094396, 2.094396),
+)
 
 # Enable-retry pacing. pyAgxArm's enable(255) is fire-once-check-once: it sends a
 # single enable frame and returns whether all joints ALREADY report enabled -- it
@@ -36,6 +45,59 @@ def _enable_retry_delay(attempt: int) -> float:
     """Backoff (seconds) before enable retry #``attempt`` (0-based): capped
     exponential. attempt=0 -> BASE, growing by FACTOR up to CAP."""
     return min(ENABLE_RETRY_CAP_S, ENABLE_RETRY_BASE_S * (ENABLE_RETRY_FACTOR ** attempt))
+
+
+@dataclass
+class PiperCommandLimiter:
+    """Generate velocity- and acceleration-limited joint position targets."""
+
+    position: list[float]
+    velocity: list[float]
+    max_velocity_rad_s: float
+    max_acceleration_rad_s2: float
+
+    @classmethod
+    def from_position(
+        cls,
+        position: list[float],
+        max_velocity_deg_s: float,
+        max_acceleration_deg_s2: float,
+    ) -> "PiperCommandLimiter":
+        return cls(
+            position=list(position),
+            velocity=[0.0] * 6,
+            max_velocity_rad_s=math.radians(max_velocity_deg_s),
+            max_acceleration_rad_s2=math.radians(max_acceleration_deg_s2),
+        )
+
+    def step(self, target: list[float], dt: float) -> list[float]:
+        if len(target) != 6:
+            raise ValueError(f"Expected 6 Piper joint targets, got {len(target)}")
+        if dt <= 0:
+            raise ValueError(f"Limiter dt must be positive, got {dt}")
+
+        for index, (lower, upper) in enumerate(PIPER_JOINT_LIMITS_RAD):
+            bounded_target = min(upper, max(lower, float(target[index])))
+            error = bounded_target - self.position[index]
+            braking_speed = math.sqrt(2.0 * self.max_acceleration_rad_s2 * abs(error))
+            desired_speed = min(self.max_velocity_rad_s, braking_speed)
+            desired_velocity = math.copysign(desired_speed, error) if error else 0.0
+            max_velocity_change = self.max_acceleration_rad_s2 * dt
+            velocity_change = min(
+                max_velocity_change,
+                max(-max_velocity_change, desired_velocity - self.velocity[index]),
+            )
+            velocity = self.velocity[index] + velocity_change
+            self.position[index] += velocity * dt
+            if self.position[index] < lower:
+                self.position[index] = lower
+                velocity = 0.0
+            elif self.position[index] > upper:
+                self.position[index] = upper
+                velocity = 0.0
+            self.velocity[index] = velocity
+
+        return list(self.position)
 
 
 @dataclass
@@ -99,74 +161,43 @@ class PiperMotorsBus:
             使能机械臂并检测使能状态; 若使能超时则返回 False (由调用方重试)。
             timeout: 使能等待上限(秒)。从冷/失能状态使能较慢, 给足时间避免误判未使能。
         '''
-        enable_flag = False
-        loop_flag = False
         if enable:
             # Stagger before the enable deadline starts: decorrelate simultaneous
             # multi-arm enable bursts so their frames don't overflow the shared tx
             # queue in lockstep (see ENABLE_INITIAL_JITTER_S).
             time.sleep(random.uniform(0.0, ENABLE_INITIAL_JITTER_S))
-        start_time = time.time()
-        while not (loop_flag):
-            elapsed_time = time.time() - start_time
-            print("--------------------")
-            # get_joints_enable_status_list() -> [bool]*6, mirrors reading the 6
-            # per-motor foc_status.driver_enable_status flags in the old SDK.
-            enable_list = self.robot.get_joints_enable_status_list()
-            if enable:
-                enable_flag = all(enable_list)
-                # robot.enable(255) returns True once all joints already report
-                # enabled, so it only flips True after the enable actually stuck.
-                # Bound this wait by the outer timeout: if the arm never enables
-                # (enable frame dropped in the connect burst, arm unpowered/
-                # e-stopped, driver fault, or status frames not arriving) an
-                # UNBOUNDED loop here hangs forever printing "piper initing" and
-                # blocks both the outer timeout and the caller's retry. On
-                # timeout, fall through -> outer loop returns False -> caller
-                # retries / raises loudly.
-                attempt = 0
-                while not self.robot.enable(255):
-                    if time.time() - start_time > timeout:
-                        print("enable timed out (motors never reported enabled)")
-                        break
-                    # Back off instead of a fixed 10 Hz resend: hammering the bus
-                    # overflows the tx queue and drops the enable frame we're
-                    # retrying (ENOBUFS), so easing off actually enables faster.
-                    time.sleep(_enable_retry_delay(attempt))
-                    attempt += 1
-                # The snapshot above was taken before the retry loop. Refresh it
-                # after enable() succeeds, otherwise a successful first enable
-                # is incorrectly treated as disabled until another outer pass.
-                enable_flag = self._all_motors_enabled()
-                if not enable_flag:
+        deadline = time.monotonic() + timeout
+
+        if enable:
+            attempt = 0
+            while True:
+                # enable() sends one frame and immediately samples the SDK's
+                # cached feedback. Re-read the per-joint state after that call;
+                # the state sampled before sending the frame is stale.
+                sdk_enabled = self.robot.enable(255)
+                enable_list = self.robot.get_joints_enable_status_list()
+                enabled = bool(sdk_enabled) and all(enable_list)
+                if enabled:
+                    break
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    failed = [i + 1 for i, status in enumerate(enable_list) if not status]
+                    print(f"enable timed out; disabled joints: {failed}")
                     return False
-                if command_gripper:
-                    self.gripper.move_gripper_m(0.0, 1.0)  # follower: enable at closed position
-                else:
-                    # A physical leader gripper must remain hand-operable while
-                    # its position feedback is used as the follower command.
-                    self.gripper.disable_gripper()
+
+                print(f"piper initing; joint enable status: {enable_list}")
+                # Do not sleep past the caller's deadline.
+                time.sleep(min(_enable_retry_delay(attempt), remaining))
+                attempt += 1
+
+            if command_gripper:
+                self.gripper.move_gripper_m(0.0, 1.0)  # follower: enable at closed position
             else:
-                # move to safe disconnect position
-                enable_flag = any(enable_list)
-                self.robot.disable(255)
+                # A physical leader gripper must remain hand-operable while its
+                # position feedback is used as the follower command.
                 self.gripper.disable_gripper()
-            print(f"使能状态: {enable_flag}")
-            print("--------------------")
-            if (enable_flag == enable):
-                loop_flag = True
-                enable_flag = True
-            else:
-                loop_flag = False
-                enable_flag = False
-            if elapsed_time > timeout:
-                print("超时....")
-                enable_flag = False
-                loop_flag = True
-                break
-            time.sleep(0.5)
-        resp = enable_flag
-        if enable and resp:
+
             # Readiness gate: do NOT hand control to teleop/record until the arm
             # is actually READY and STAYS ready. Declaring success the instant
             # enable first reads True (then a blind sleep) causes the intermittent
@@ -185,8 +216,20 @@ class PiperMotorsBus:
             if not self._wait_until_ready(timeout=5.0, stable_needed=0.6):
                 print("arm not stably ready (enable+feedback) within deadline; failing connect to trigger retry")
                 return False
-        print(f"Returning response: {resp}")
-        return resp
+            print("Returning response: True")
+            return True
+
+        # Disable path: issue the command, then verify fresh per-joint feedback.
+        self.robot.disable(255)
+        self.gripper.disable_gripper()
+        while time.monotonic() < deadline:
+            enable_list = self.robot.get_joints_enable_status_list()
+            if not any(enable_list):
+                print("Returning response: True")
+                return True
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        print(f"disable timed out; joint enable status: {self.robot.get_joints_enable_status_list()}")
+        return False
 
     def _all_motors_enabled(self) -> bool:
         """True iff all 6 joint drivers currently report enabled."""
@@ -289,6 +332,18 @@ class PiperMotorsBus:
         self._ensure_speed(self.speed_percent)
         self.robot.move_j([float(target_joint[i]) for i in range(6)])
         gripper_m = abs(float(target_joint[6]))
+        self.gripper.move_gripper_m(gripper_m, GRIPPER_CMD_FORCE_N)
+
+    def write_js(self, target_joint: list) -> None:
+        """Send a filtered target using Piper's direct follower/pass-through mode.
+
+        Callers must apply joint, velocity, and acceleration limits before using
+        this method. Normal replay/deployment continues to use :meth:`write`.
+        """
+        if len(target_joint) != 7:
+            raise ValueError(f"Expected 7 Piper targets, got {len(target_joint)}")
+        self.robot.move_js([float(target_joint[i]) for i in range(6)])
+        gripper_m = min(0.08, max(0.0, abs(float(target_joint[6]))))
         self.gripper.move_gripper_m(gripper_m, GRIPPER_CMD_FORCE_N)
 
     def read(self) -> Dict:

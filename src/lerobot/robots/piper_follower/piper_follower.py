@@ -1,13 +1,19 @@
 #!/usr/bin/env python
 
 import logging
+import math
 import time
 from functools import cached_property
 from typing import Any
 
 from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
-from lerobot.motors.piper.piper import PiperMotorsBus, PiperMotorsBusConfig
+from lerobot.motors.piper.piper import (
+    JOINT_RAD_TO_RAW,
+    PiperCommandLimiter,
+    PiperMotorsBus,
+    PiperMotorsBusConfig,
+)
 
 from ..robot import Robot
 from .config_piper_follower import PIPERFollowerConfig
@@ -46,7 +52,45 @@ class PIPERFollower(Robot):
         self.logs = {}
         self._is_connected = False
         self._is_calibrated = False
+        self._command_limiter: PiperCommandLimiter | None = None
+        self._move_js_safety_tripped = False
+        self._last_sent_action: dict[str, float] | None = None
+        if config.teleop_control_mode not in {"move_j", "move_js"}:
+            raise ValueError(
+                f"teleop_control_mode must be 'move_j' or 'move_js', got {config.teleop_control_mode!r}"
+            )
+        if config.teleop_control_hz <= 0:
+            raise ValueError("teleop_control_hz must be positive")
+        if config.max_velocity_deg_s <= 0 or config.max_acceleration_deg_s2 <= 0:
+            raise ValueError("Piper move_js velocity and acceleration limits must be positive")
+        if config.max_tracking_error_deg <= 0:
+            raise ValueError("max_tracking_error_deg must be positive")
         self.cameras = make_cameras_from_configs(config.cameras)
+
+    def _current_joints_rad(self) -> list[float]:
+        raw = self.bus.read()
+        return [float(raw[f"joint_{index}"]) / JOINT_RAD_TO_RAW for index in range(1, 7)]
+
+    def _reset_command_limiter(self) -> None:
+        self._command_limiter = PiperCommandLimiter.from_position(
+            self._current_joints_rad(),
+            max_velocity_deg_s=self.config.max_velocity_deg_s,
+            max_acceleration_deg_s2=self.config.max_acceleration_deg_s2,
+        )
+        self._move_js_safety_tripped = False
+        self._last_sent_action = None
+
+    def trigger_move_js_safety_stop(self, reason: str) -> None:
+        """Damped-stop this arm and latch out subsequent streaming commands."""
+        if self._move_js_safety_tripped:
+            return
+        self.bus.robot.electronic_emergency_stop()
+        self._move_js_safety_tripped = True
+        logger.critical(
+            "Piper move_js SAFETY STOP: %s. Stop recording and inspect the arm; "
+            "automatic homing is disabled for this disconnect.",
+            reason,
+        )
 
     @property
     def camera_features(self) -> dict:
@@ -114,6 +158,10 @@ class PIPERFollower(Robot):
         return self.bus.is_calibrated
 
     @property
+    def move_js_safety_tripped(self) -> bool:
+        return self._move_js_safety_tripped
+
+    @property
     def has_camera(self):
         return len(self.cameras) > 0
 
@@ -151,6 +199,9 @@ class PIPERFollower(Robot):
             )
         print("piper follower connected")
 
+        if self.config.teleop_control_mode == "move_js":
+            self._reset_command_limiter()
+
         # connect cameras
         for name in self.cameras:
             self.cameras[name].connect()
@@ -160,6 +211,17 @@ class PIPERFollower(Robot):
 
     def disconnect(self) -> None:
         """回 home 后软失能(阻尼缓慢放下, 避免自由落体), 再断开相机。"""
+        if self._move_js_safety_tripped:
+            # electronic_emergency_stop() already placed the arm in a damped
+            # stop. Do not automatically re-enable and home after a tracking
+            # fault; that could move further into the condition that caused it.
+            print("piper move_js safety stop active; leaving arm stopped without automatic homing")
+            self.bus.disconnect()
+            for cam in self.cameras.values():
+                cam.disconnect()
+            self._is_connected = False
+            return
+
         print("piper gently disabling (home + soft release)...")
         self.bus.gentle_disable()
         print("piper gently disabled")
@@ -182,6 +244,8 @@ class PIPERFollower(Robot):
         for attempt in range(ARM_READY_ATTEMPTS):
             if self.bus.move_to_home():
                 self._is_calibrated = True
+                if self.config.teleop_control_mode == "move_js":
+                    self._reset_command_limiter()
                 return
             print(f"piper follower re-home — retry {attempt + 1}/{ARM_READY_ATTEMPTS} ...")
         raise DeviceNotConnectedError(
@@ -212,6 +276,36 @@ class PIPERFollower(Robot):
 
         motor_order = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "gripper"]
         target_joints = [action[f"{motor}.pos"] for motor in motor_order]
+
+        if self.config.teleop_control_mode == "move_js":
+            if self._move_js_safety_tripped:
+                return dict(self._last_sent_action or action)
+            if self._command_limiter is None:
+                self._reset_command_limiter()
+
+            limited_joints = self._command_limiter.step(
+                [float(value) for value in target_joints[:6]],
+                dt=1.0 / self.config.teleop_control_hz,
+            )
+            current_joints = self._current_joints_rad()
+            errors = [abs(command - state) for command, state in zip(limited_joints, current_joints, strict=True)]
+            worst_index = max(range(6), key=errors.__getitem__)
+            if errors[worst_index] > math.radians(self.config.max_tracking_error_deg):
+                self.trigger_move_js_safety_stop(
+                    f"joint_{worst_index + 1} tracking error "
+                    f"{math.degrees(errors[worst_index]):.2f} deg exceeds "
+                    f"{self.config.max_tracking_error_deg:.2f} deg"
+                )
+                return dict(self._last_sent_action or action)
+
+            gripper_m = min(0.08, max(0.0, abs(float(target_joints[6]))))
+            sent_action = {
+                **{f"joint_{index + 1}.pos": value for index, value in enumerate(limited_joints)},
+                "gripper.pos": gripper_m,
+            }
+            self.bus.write_js([*limited_joints, gripper_m])
+            self._last_sent_action = sent_action
+            return dict(sent_action)
 
         self.bus.write(target_joints)
         return action

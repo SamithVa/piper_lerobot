@@ -358,10 +358,18 @@ def record_loop(
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         _sent_action = robot.send_action(robot_action_to_send)
+        if getattr(robot, "move_js_safety_tripped", False):
+            logging.critical("Robot tracking watchdog stopped motion; discarding the episode and ending recording.")
+            events["stop_recording"] = True
+            events["rerecord_episode"] = True
+            break
 
         # Write to dataset
         if dataset is not None:
-            action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
+            # Record the post-limiter command actually sent by the robot. This
+            # matters for filtered move_js teleoperation: saving the raw leader
+            # target would give training data incorrect action labels.
+            action_frame = build_dataset_frame(dataset.features, _sent_action, prefix=ACTION)
             frame = {**observation_frame, **action_frame, "task": single_task}
             dataset.add_frame(frame)
 

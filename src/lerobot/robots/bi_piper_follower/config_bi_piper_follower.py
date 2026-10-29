@@ -29,6 +29,14 @@ class BiPiperFollowerConfig(RobotConfig):
     left_arm_can: str = "left_follower"
     right_arm_can: str = "right_follower"
 
+    # Opt-in streaming follower controller. Defaults preserve move_j for all
+    # callers unless the recording command explicitly selects move_js.
+    teleop_control_mode: str = "move_j"
+    teleop_control_hz: float = 50.0
+    max_velocity_deg_s: float = 45.0
+    max_acceleration_deg_s2: float = 200.0
+    max_tracking_error_deg: float = 12.0
+
     # cameras (shared between both arms)
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
