@@ -5,11 +5,12 @@
 #   1. CAN interfaces up with role names:   bash utils/activate_all_can.sh
 #      (left_leader / left_follower / right_leader / right_follower)
 #   2. Camera symlinks:                     sudo bash utils/setup_camera_symlinks.sh
-#      (creates /dev/l_wrist, /dev/top, /dev/r_wrist)
+#      (creates /dev/top, /dev/r_wrist; l_wrist is the RealSense D435, by serial)
 #
 # Uses base python (has piper_sdk + deps) but forces import of THIS checkout's src.
 set -e
-REPO=/data/wanshan/VLAs/piper_lerobot
+# REPO=/data/wanshan/VLAs/piper_lerobot
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY=/home/embodied/miniconda3/bin/python
 
 REPO_ID="${1:-samithva/test_3}"
@@ -23,7 +24,7 @@ DATASET_ROOT="$REPO/dataset/$REPO_ID"
 # USB cams) at 640x480. MJPG@640x480 on these cameras only offers 120fps; the record
 # loop still samples at 30fps. Compressed ~2 MB/s each -> all 3 fit the shared bus.
 CAMERAS='{
-  "l_wrist": {"type": "opencv", "index_or_path": "/dev/l_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
+  "l_wrist": {"type": "intelrealsense", "serial_number_or_name": "263222075317", "width": 640, "height": 480, "fps": 30},
   "top":     {"type": "opencv", "index_or_path": "/dev/top",     "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"},
   "r_wrist": {"type": "opencv", "index_or_path": "/dev/r_wrist", "width": 640, "height": 480, "fps": 120, "fourcc": "MJPG"}
 }'
